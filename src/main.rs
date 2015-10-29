@@ -66,17 +66,21 @@ fn print_mc(mc: &MCTree) {
     println!("");
 }
 
-fn mc_move<T: rand::Rng, G: Game>(rng: &mut T, g: &G, mc: &mut MCTree, explore: f64) -> usize {
+fn mc_expand<G: Game>(mc: &mut MCTree, g: &G) {
     if mc.replies.is_none() {
-        mc.plays = 0; // TODO we really need a separate child_plays or something do we not?
+        mc.plays = 0; // TODO is this really correct to do?
         mc.replies = Some({
             let mut reps = VecMap::new();
             for m in g.legal_moves() {
-               reps.insert(m, MCTree::new());
+                reps.insert(m, MCTree::new());
             }
             reps
         })
     }
+}
+
+fn mc_move<T: rand::Rng, G: Game>(rng: &mut T, g: &G, mc: &mut MCTree, explore: f64) -> usize {
+    mc_expand(mc, g);
     let lnt = if mc.plays == 0 { 0.0 } else { (mc.plays as f64).ln() };
     let mut best_score = -1.0;
     let mut best = Vec::new();
