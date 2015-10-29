@@ -30,11 +30,12 @@ use quickcheck::*;
 struct MCTree {
     wins: f64,
     plays: usize,
+    reply_plays: usize,
     replies: Option<VecMap<MCTree>>
 }
 
 impl MCTree {
-    fn new() -> MCTree { MCTree { wins: 0.0, plays: 0, replies: None } }
+    fn new() -> MCTree { MCTree { wins: 0.0, plays: 0, reply_plays: 0, replies: None } }
     fn next(self: MCTree, mv: usize) -> MCTree {
         self.replies.and_then(|mut replies| {
             replies.remove(&mv)
@@ -56,7 +57,7 @@ fn mc_score(mc: &MCTree, lnt: f64, explore: f64) -> f64 {
 }
 
 fn print_mc(mc: &MCTree) {
-    let lnt = (mc.plays as f64).ln();
+    let lnt = (mc.reply_plays as f64).ln();
     let explore = 2.0f64.sqrt();
     if let Some(ref rs) = mc.replies {
         for (i, r) in rs.iter() {
@@ -68,7 +69,6 @@ fn print_mc(mc: &MCTree) {
 
 fn mc_expand<G: Game>(mc: &mut MCTree, g: &G) {
     if mc.replies.is_none() {
-        mc.plays = 0; // TODO is this really correct to do?
         mc.replies = Some({
             let mut reps = VecMap::new();
             for m in g.legal_moves() {
@@ -81,7 +81,9 @@ fn mc_expand<G: Game>(mc: &mut MCTree, g: &G) {
 
 fn mc_move<T: rand::Rng, G: Game>(rng: &mut T, g: &G, mc: &mut MCTree, explore: f64) -> usize {
     mc_expand(mc, g);
-    let lnt = if mc.plays == 0 { 0.0 } else { (mc.plays as f64).ln() };
+    let lnt = if mc.reply_plays == 0 { 0.0 } else { (mc.reply_plays as f64).ln() };
+    assert!(mc.plays >= mc.reply_plays);
+    debug_assert_eq!(mc.reply_plays, mc.replies.as_ref().unwrap().iter().fold(0, |acc, (_, r)| acc + r.plays));
     let mut best_score = -1.0;
     let mut best = Vec::new();
     for (p, rep) in mc.replies.as_ref().unwrap().iter() {
@@ -114,6 +116,7 @@ fn play_out<T: rand::Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
 
 fn mc_iteration<T: rand::Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree) -> f64 {
     let mv = mc_move(rng, g, mc, 2.0f64.sqrt());
+    mc.reply_plays += 1;
     let mut reply = mc.get_mut(mv);
     let expanding = reply.plays == 0;
     g.play(mv);
