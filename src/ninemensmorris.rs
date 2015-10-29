@@ -59,7 +59,7 @@ impl Game for NineMensMorris {
         if self.turn < 18 {
             None
         } else {
-            let mine = Some(!self.current_player());
+            let mine = Some(self.current_player());
             let yours = Some(!self.current_player());
             if self.board.iter().filter(|&&x| x == yours).count() <= 2 { Some(1.0) }
             else if self.history.contains(&self.board) { Some(0.5) }
