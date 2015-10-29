@@ -9,7 +9,7 @@ pub struct NineMensMorris {
     history: HashSet<[Option<bool>; 24]>
 }
 
-static mills : [[usize; 3]; 16] = [
+static MILLS : [[usize; 3]; 16] = [
     [0,1,2], [3,4,5], [6,7,8],
     [9,10,11], [12,13,14],
     [15,16,17], [18,19,20], [21,22,23],
@@ -18,34 +18,85 @@ static mills : [[usize; 3]; 16] = [
     [2,14,23], [5,13,20], [8,12,17]
 ];
 
-// TODO is there a way toreturn an iterator of this? Prob not.
-fn mills_containing(x: usize) -> Vec<&'static [usize; 3]> {
-    mills.iter().filter(|m| m.contains(&x)).collect()
-}
+static MILLS_BY_SPACE : [[[usize; 2]; 2]; 24] = [
+    [[1,2], [9,21]], // 0
+    [[0,2], [4,7]], // 1
+    [[0,1], [14,23]], // 2
+    [[4,5], [10,18]], // 3
+    [[3,5], [1,7]], // 4
+    [[3,4], [13,20]], // 5
+    [[7,8], [11,15]], // 6
+    [[6,8], [1,4]], // 7
+    [[6,7], [12,17]], // 8
+    [[10,11], [0,21]], // 9
+    [[9,11], [3,18]], // 10
+    [[9,10], [6,15]], // 11
+    [[13,14], [8,17]], // 12
+    [[12,14], [5,20]], // 13
+    [[12,13], [2,23]], // 14
+    [[16,17], [6,11]], // 15
+    [[15,17], [19,22]], // 16
+    [[15,16], [8,12]], // 17
+    [[19,20], [3,10]], // 18
+    [[18,20], [16,22]], // 19
+    [[18,19], [5,13]], // 20
+    [[22,23], [0,9]], // 21
+    [[21,23], [16,19]], // 22
+    [[21,22], [2,14]]
+];
 
-fn adjacent_spaces_to(x: usize) -> BitSet {
-    let mut spaces = mills.iter().flat_map(|m| m.windows(2)).filter(|w| w.contains(&x)).flat_map(|w| w).cloned().collect::<BitSet>();
-    spaces.remove(&x);
-    spaces
-}
+static ADJACENT_SPACES : [&'static [usize]; 24] = [
+    &[1,9], // 0
+    &[0,2,4], // 1
+    &[1,14], // 2
+    &[4,10], // 3
+    &[1,3,5,7], // 4
+    &[4,13], // 5
+    &[7,11], // 6
+    &[4,7,8], // 7
+    &[7,12], // 8
+    &[0,10,21], // 9
+    &[3,9,11,18], // 10
+    &[6,10,15], // 11
+    &[8,13,17], // 12
+    &[5,12,14,20], // 13
+    &[2,13,23], // 14
+    &[11,16], // 15
+    &[15,17,19], // 16
+    &[12,16], // 17
+    &[10,19], // 18
+    &[16,18,20,22], // 19
+    &[13,19], // 20
+    &[9,22], // 21
+    &[19,21,23], // 22
+    &[14,22] // 23
+];
 
 impl NineMensMorris {
     fn current_player(&self) -> bool { self.turn % 2 == 0 }
     fn forms_mill(&self, x: usize) -> bool { self.possible_mills_for(x).len() > 0 }
     fn forms_mill_without(&self, x: usize, y: usize) -> bool { self.possible_mills_for(x).iter().filter(|m| !m.contains(&y)).count() > 0 }
-    fn possible_mills_for(&self, x: usize) -> Vec<&'static [usize; 3]> {
+    fn possible_mills_for(&self, x: usize) -> Vec<&'static [usize; 2]> {
         let c = Some(self.current_player());
-        mills_containing(x).into_iter().filter(|m| m.iter().all(|&y| x == y || c == self.board[y])).collect()
+        MILLS_BY_SPACE[x].iter().filter(|m| m.iter().all(|&y| c == self.board[y])).collect()
     }
     fn removable_pieces(&self) -> BitSet {
         let c = Some(!self.current_player());
-        let in_mills = mills.iter().filter(|m| m.iter().all(|&x| c == self.board[x])).flat_map(|m| m).cloned().collect::<BitSet>();
-        let mut out_of_mills = self.board.iter().enumerate().filter(|&(_, &x)| x == c).map(|(i, _)| i).collect::<BitSet>();
-        out_of_mills.difference_with(&in_mills);
+        let mut in_mills = BitSet::with_capacity(24);
+        let mut out_of_mills = BitSet::with_capacity(24);
+        for i in 0..self.board.len() {
+            if self.board[i] == c {
+                if MILLS_BY_SPACE[i].iter().any(|m| m.iter().all(|&y| c == self.board[y])) {
+                    in_mills.insert(i);
+                } else {
+                    out_of_mills.insert(i);
+                }
+            }
+        }
         if out_of_mills.is_empty() { in_mills } else { out_of_mills }
     }
     fn adjacent_free(&self, x: usize) -> BitSet {
-        let mut ret = adjacent_spaces_to(x);
+        let mut ret = ADJACENT_SPACES[x].iter().cloned().collect::<BitSet>();
         for (i, x) in self.board.iter().enumerate() { if x.is_some() { ret.remove(&i); } };
         ret
     }
