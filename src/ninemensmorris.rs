@@ -112,9 +112,15 @@ impl Game for NineMensMorris {
         } else {
             let mine = Some(self.current_player());
             let yours = Some(!self.current_player());
-            if self.board.iter().filter(|&&x| x == yours).count() <= 2 { Some(1.0) }
+            let mut n_mine = 0;
+            let mut n_yours = 0;
+            for &x in self.board.iter() {
+                if x == mine { n_mine+= 1 }
+                else if x == yours { n_yours+= 1 }
+            }
+            if n_yours <= 2 { Some(1.0) }
+            else if n_mine <= 2 || self.legal_moves().is_empty() { Some(0.0) }
             else if self.history.contains(&self.board) { Some(0.5) }
-            else if self.board.iter().filter(|&&x| x == mine).count() <= 2 || self.legal_moves().is_empty() { Some(0.0) }
             else { None }
         }
     }

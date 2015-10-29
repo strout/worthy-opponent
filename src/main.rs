@@ -16,6 +16,7 @@ use bit_set::BitSet;
 use rand::Rng;
 
 mod game;
+mod basics;
 mod go;
 mod tictactoe;
 mod ninemensmorris;
