@@ -164,7 +164,13 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>) {
 fn main() {
     let (sendcmd, recvcmd) = channel();
     let (sendmv, recvmv) = channel();
-    thread::spawn(|| think::<tictactoe::TicTacToe>(recvcmd, sendmv));
+    let game = std::env::args().nth(1).unwrap();
+    thread::spawn(move || match game.as_ref() {
+        "t" => think::<tictactoe::TicTacToe>(recvcmd, sendmv),
+        "n" => think::<ninemensmorris::NineMensMorris>(recvcmd, sendmv),
+        "g" => think::<go::GoState>(recvcmd, sendmv),
+        _ => return
+    });
     loop {
         thread::sleep_ms(THINK_MS);
         match sendcmd.send(Cmd::Gen) {
