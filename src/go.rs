@@ -420,7 +420,7 @@ pub type GoState = (Board, History, Color, usize);
 
 impl Game for GoState {
     fn init() -> GoState {
-        (make_board(5, 0.0), History::new(), Black, 0)
+        (make_board(19, 0.0), History::new(), Black, 0)
     }
     fn payoff(&self) -> Option<f64> {
         if self.3 > 1 {
@@ -431,9 +431,9 @@ impl Game for GoState {
         } else { None }
     }
     fn legal_moves(&self) -> Vec<usize> {
+        let max = self.0.size * self.0.size;
         let mut moves = self.0.dat.iter().enumerate().filter(|&(_, x)| x.is_none()).map(|(i, _)| i).collect::<Vec<_>>();
-        let sz = self.0.size;
-        moves.push(sz * sz);
+        moves.push(max);
         moves
     }
     fn play(&mut self, act: usize) {
