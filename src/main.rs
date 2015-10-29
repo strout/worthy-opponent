@@ -82,7 +82,6 @@ fn mc_expand<G: Game>(mc: &mut MCTree, g: &G) {
 fn mc_move<T: rand::Rng, G: Game>(rng: &mut T, g: &G, mc: &mut MCTree, explore: f64) -> usize {
     mc_expand(mc, g);
     let lnt = if mc.reply_plays == 0 { 0.0 } else { (mc.reply_plays as f64).ln() };
-    assert!(mc.plays >= mc.reply_plays);
     debug_assert_eq!(mc.reply_plays, mc.replies.as_ref().unwrap().iter().fold(0, |acc, (_, r)| acc + r.plays));
     let mut best_score = -1.0;
     let mut best = Vec::new();
@@ -158,7 +157,6 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>) {
         for _ in 0..50 {
             g2.clone_from(&g);
             mc_iteration(&mut rng, &mut g2, &mut mc);
-            mc.plays += 1;
         }
     }
 }
