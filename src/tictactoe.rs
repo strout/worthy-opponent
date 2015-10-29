@@ -6,16 +6,14 @@ pub struct TicTacToe {
     current: bool
 }
 
+static GROUPS : [[usize; 3]; 8] = [[0,1,2], [3,4,5], [6,7,8], [0,3,6], [1,4,7], [2,5,8], [0,4,8], [2,4,6]];
+
 impl TicTacToe {
     fn winner(&self) -> Option<bool> {
-       if self.board[0] != None && self.board[0] == self.board[1] && self.board[0] == self.board[2] { return self.board[0] }
-       if self.board[3] != None && self.board[3] == self.board[4] && self.board[3] == self.board[5] { return self.board[3] }
-       if self.board[6] != None && self.board[6] == self.board[7] && self.board[6] == self.board[8] { return self.board[6] }
-       if self.board[0] != None && self.board[0] == self.board[3] && self.board[0] == self.board[6] { return self.board[0] }
-       if self.board[1] != None && self.board[1] == self.board[4] && self.board[1] == self.board[7] { return self.board[1] }
-       if self.board[2] != None && self.board[2] == self.board[5] && self.board[2] == self.board[8] { return self.board[2] }
-       if self.board[0] != None && self.board[0] == self.board[4] && self.board[0] == self.board[8] { return self.board[0] }
-       if self.board[2] != None && self.board[2] == self.board[4] && self.board[2] == self.board[6] { return self.board[2] }
+       for grp in GROUPS.iter() {
+           let x = self.board[grp[0]];
+           if x.is_some() && x == self.board[grp[1]] && x == self.board[grp[2]] { return x }
+       }
        None
     }
 }
