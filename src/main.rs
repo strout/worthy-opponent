@@ -13,6 +13,7 @@ use vec_map::VecMap;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 use bit_set::BitSet;
+use rand::Rng;
 
 mod game;
 mod go;
@@ -51,13 +52,13 @@ impl MCTree {
 fn mc_score(mc: &MCTree, lnt: f64, explore: f64) -> f64 {
     let default = std::f64::INFINITY;
     match *mc {
-        MCTree { plays: 0, .. } => default + explore * lnt.sqrt(),
+        MCTree { plays: 0, .. } => default,
         MCTree { wins, plays, .. } => wins / plays as f64 + explore * (lnt / (plays as f64)).sqrt()
     }
 }
 
 fn print_mc(mc: &MCTree) {
-    let lnt = (mc.reply_plays as f64).ln();
+    let lnt = (mc.reply_plays as f64).ln_1p();
     let explore = 2.0f64.sqrt();
     if let Some(ref rs) = mc.replies {
         for (i, r) in rs.iter() {
@@ -79,26 +80,30 @@ fn mc_expand<G: Game>(mc: &mut MCTree, g: &G) {
     }
 }
 
-fn mc_move<T: rand::Rng, G: Game>(rng: &mut T, g: &G, mc: &mut MCTree, explore: f64) -> usize {
+fn mc_move<T: Rng, G: Game>(rng: &mut T, g: &G, mc: &mut MCTree, explore: f64) -> usize {
     mc_expand(mc, g);
-    let lnt = if mc.reply_plays == 0 { 0.0 } else { (mc.reply_plays as f64).ln() };
+    let lnt = (mc.reply_plays as f64).ln_1p();
     debug_assert_eq!(mc.reply_plays, mc.replies.as_ref().unwrap().iter().fold(0, |acc, (_, r)| acc + r.plays));
-    let mut best_score = -1.0;
-    let mut best = Vec::new();
+    let mut best_score = std::f64::NEG_INFINITY;
+    let mut best = None;
+    let mut count = 0;
     for (p, rep) in mc.replies.as_ref().unwrap().iter() {
         let score = mc_score(rep, lnt, explore);
         if score > best_score {
-            best.clear();
+            best = Some(p);
             best_score = score;
-        }
-        if score >= best_score {
-            best.push(p);
+            count = 1;
+        } else if score == best_score {
+            count += 1;
+            if rng.gen_range(0, count) == 0 {
+                best = Some(p);
+            }
         }
     }
-    *rng.choose(&best[..]).unwrap() // TODO what if no legal moves?
+    best.unwrap() // TODO what if no legal moves?
 }
 
-fn play_out<T: rand::Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
+fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
     let mut flip = false;
     loop
     {
@@ -113,7 +118,7 @@ fn play_out<T: rand::Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
     }
 }
 
-fn mc_iteration<T: rand::Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree) -> f64 {
+fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree) -> f64 {
     let mv = mc_move(rng, g, mc, 2.0f64.sqrt());
     mc.reply_plays += 1;
     let mut reply = mc.get_mut(mv);
