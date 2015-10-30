@@ -1,7 +1,8 @@
 const DEFAULT_SIZE : usize = 9;
+
+#[cfg(test)]
 const DEFAULT_KOMI : f32 = 7.5;
 
-use std::io;
 use bit_set::BitSet;
 use game::Game;
 use basics::*;
@@ -141,25 +142,7 @@ fn play(c: Color, mv: Option<Pos>, board: &mut Board, h: &mut History) -> bool {
     ok
 }
 
-fn legal(c: Color, mv: Option<Pos>, board: &Board, h: &History) -> bool {
-    let p = match mv {
-        None => return true,
-             Some(p) => p
-    };
-    if board.dat[p].is_some() { return false }
-    let mut nb = board.clone();
-    nb.dat[p] = Some(c);
-    let oc = c.enemy();
-    for &p in neighbors(p, nb.size).into_iter().flat_map(|x| x) {
-        for p in capture(oc, p, &nb).iter() {
-            nb.dat[p] = None;
-        }
-    }
-    has_liberties(p, &nb) && !h.contains(nb.dat.iter().cloned())
-}
-
 const UPPER_LETTERS : &'static str = "ABCDEFGHJKLMNOPQRSTUVWXYZ";
-const DOWN_LETTERS : &'static str = "abcdefghjklmnopqrstuvwxyz";
 
 fn to_letter(n : usize) -> char {
     UPPER_LETTERS.chars().nth(n).unwrap()
@@ -181,69 +164,10 @@ fn print_board(b: &Board) {
     println!("");
 }
 
-fn parse_pos(s: &str, sz: usize) -> Option<Pos> {
-    if s.len() < 1 { return None }
-    let y = s[1..].parse::<usize>().ok();
-    let xch = s.chars().nth(0);
-    xch.and_then(|xch| y.and_then(|y| UPPER_LETTERS.chars().position(|c| c == xch).or_else(|| DOWN_LETTERS.chars().position(|c| c == xch)).map(|x| (y - 1) * sz + x)))
-}
-
-fn hu_pos(sz: usize) -> Option<Pos> {
-    print!("Enter coordinate or anything else to pass\n");
-    let stdin = io::stdin();
-    let mut line = String::new();
-    stdin.read_line(&mut line).unwrap();
-    parse_pos(line.trim(), sz)
-}
-
 fn make_board(sz: usize, komi: f32) -> Board {
     let len = sz * sz;
     BoardOf { dat: vec![None; len], size: sz, komi: komi }
 }
-
-/* TODO
-fn console() {
-    let mut c = Black;
-    let mut passed = false;
-    let mut board = make_board(DEFAULT_SIZE, DEFAULT_KOMI);
-    let mut h = History::new();
-    let (sendcmd, recvcmd) = channel();
-    let (sendmv, recvmv) = channel();
-    thread::spawn(|| think(recvcmd, sendmv));
-    loop {
-        print_board(&board);
-        let mv = if c == Black {
-            if cfg!(feature = "human_black") {
-                hu_pos(3)
-            } else {
-                thread::sleep_ms(THINK_MS);
-                sendcmd.send(Cmd::Gen).unwrap();
-                recvmv.recv().unwrap()
-            }
-        } else {
-            if cfg!(feature = "human_white") {
-                hu_pos(3)
-            } else {
-                thread::sleep_ms(THINK_MS);
-                sendcmd.send(Cmd::Gen).unwrap();
-                recvmv.recv().unwrap()
-            }
-        };
-        sendcmd.send(Cmd::Move(c, mv)).unwrap();
-        let passed2 = mv.is_none() || !play(c, mv, &mut board, &mut h);
-        if passed && passed2 { break }
-        c = c.enemy();
-        passed = passed2;
-    }
-    print!("-------------------------------------\n");
-    print_board(&board);
-    print!("{:?}\n", score(&board));
-}
-
-fn main() {
-    if cfg!(feature = "gtp") { gtp() } else { console() }
-}
-*/
 
 #[cfg(test)]
 mod tests {
@@ -252,7 +176,7 @@ mod tests {
     use test::Bencher;
     use rand;
 
-#[test]
+    #[test]
     fn history_present_iff_added() {
         fn test(xss: Vec<Vec<Space>>, new: Vec<Space>) -> TestResult {
             if new.len() == 0 { return TestResult::discard() }
@@ -263,7 +187,7 @@ mod tests {
         quickcheck(test as fn(Vec<Vec<Space>>, Vec<Space>) -> TestResult);
     }
 
-#[bench]
+    #[bench]
     fn history_insert_1000(bench: &mut Bencher) {
         let mut rng = rand::weak_rng();
         bench.iter(|| {
@@ -274,7 +198,7 @@ mod tests {
                 });
     }
 
-#[bench]
+    #[bench]
     fn hashset_insert_1000(bench: &mut Bencher) {
         use std::collections::HashSet;
         let mut rng = rand::weak_rng();
@@ -286,7 +210,7 @@ mod tests {
                 });
     }
 
-#[bench]
+    #[bench]
     fn play_out_bench(bench: &mut Bencher) {
         let mut rng = rand::weak_rng();
         bench.iter(|| play_out(&mut rng, Black, false, &mut make_board(DEFAULT_SIZE, DEFAULT_KOMI)));
@@ -314,7 +238,6 @@ impl Game for GoState {
         moves
     }
     fn play(&mut self, act: usize) {
-        let c = self.2;
         let sz = self.0.size;
         let pass = act >= sz * sz;
         let ok = play(self.2, if pass { None } else { Some(act) }, &mut self.0, &mut self.1);

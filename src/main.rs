@@ -1,5 +1,3 @@
-#![feature(test)]
-
 extern crate rand;
 extern crate bit_set;
 extern crate vec_map;
@@ -12,7 +10,6 @@ extern crate quickcheck;
 use vec_map::VecMap;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
-use bit_set::BitSet;
 use rand::Rng;
 
 mod game;
