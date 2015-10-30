@@ -170,12 +170,12 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>) {
 fn main() {
     let (sendcmd, recvcmd) = channel();
     let (sendmv, recvmv) = channel();
-    let game = std::env::args().nth(1).unwrap();
+    let game = std::env::args().nth(1).expect("Please supply a game (t = Tic-Tac-Toe, n = Nine Men's Morris, g = Go)");
     thread::spawn(move || match game.as_ref() {
         "t" => think::<tictactoe::TicTacToe>(recvcmd, sendmv),
         "n" => think::<ninemensmorris::NineMensMorris>(recvcmd, sendmv),
         "g" => think::<go::GoState>(recvcmd, sendmv),
-        _ => return
+        x => panic!("I don't know how to play '{}'.", x)
     });
     loop {
         thread::sleep_ms(THINK_MS);
