@@ -74,32 +74,6 @@ fn score(board: &Board) -> (f32, f32) {
     (b, w + board.komi)
 }
 
-fn has_liberties_inner(c: Color, p: Pos, b: &Board, visited: &mut BitSet) -> bool {
-    let mut stack = vec![p];
-    loop {
-        match stack.pop() {
-            None => return false,
-                 Some(p) => if !visited.contains(&p) {
-                     visited.insert(p);
-                     match b.dat[p] {
-                         None => return true,
-                              Some(c2) => if c == c2 {
-                                  stack.extend(neighbors(p, b.size).into_iter().filter_map(Option::clone))
-                              }
-                     }
-                 }
-        }
-    }
-}
-
-fn has_liberties(p: Pos, b: &Board) -> bool {
-    let mut visited = BitSet::with_capacity(b.size * b.size);
-    match b.dat[p] {
-        None => false,
-             Some(c) => has_liberties_inner(c, p, b, &mut visited)
-    }
-}
-
 fn capture(c: Color, p: Pos, b: &Board) -> BitSet {
     let mut captured = BitSet::with_capacity(b.size * b.size);
     let mut stack = vec![p];
@@ -131,13 +105,14 @@ fn play(c: Color, mv: Option<Pos>, board: &mut Board, h: &mut History) -> bool {
     for &p in neighbors(p, board.size).into_iter().flat_map(|x| x) {
         captured.union_with(&capture(oc, p, &board))
     }
-    for p in captured.iter() {
-        board.dat[p] = None;
-    }
-    let ok = has_liberties(p, &board) && h.insert(board.dat.iter().cloned());
+    for p in captured.iter() { board.dat[p] = None; }
+    let self_captured = capture(c, p, &board);
+    for p in self_captured.iter() { board.dat[p] = None; }
+    let ok = h.insert(board.dat.iter().cloned());
     if !ok {
-        board.dat[p] = None;
+        for p in self_captured.iter() { board.dat[p] = Some(c); }
         for p in captured.iter() { board.dat[p] = Some(oc); }
+        board.dat[p] = None;
     }
     ok
 }
@@ -217,14 +192,16 @@ mod tests {
     }
 }
 
-pub type GoState = (Board, History, Color, usize);
+pub type GoState = (Board, History, Color, usize, bool);
 
 impl Game for GoState {
     fn init() -> GoState {
-        (make_board(DEFAULT_SIZE, 0.0), History::new(), Black, 0)
+        (make_board(DEFAULT_SIZE, 0.0), History::new(), Black, 0, false)
     }
     fn payoff(&self) -> Option<f64> {
-        if self.3 > 1 {
+        if self.4 {
+            Some(1.0) // opponent made an illegal play; we win
+        } else if self.3 > 1 {
             let (b, w) = score(&self.0);
             if b == w { Some(0.5) }
             else if (b > w) ^ (self.2 == Black) { Some(0.0) }
@@ -239,10 +216,13 @@ impl Game for GoState {
     }
     fn play(&mut self, act: usize) {
         let sz = self.0.size;
-        let pass = act >= sz * sz;
-        let ok = play(self.2, if pass { None } else { Some(act) }, &mut self.0, &mut self.1);
+        if act >= sz * sz {
+            self.3 += 1
+        } else {
+            self.3 = 0;
+            self.4 = !play(self.2, Some(act), &mut self.0, &mut self.1);
+        }
         self.2 = self.2.enemy();
-        self.3 = if pass || !ok { self.3 + 1 } else { 0 }; 
     }
     fn print(&self) {
         print_board(&self.0);
