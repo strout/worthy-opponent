@@ -157,10 +157,8 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>) {
                 mvs.send(mc_move(&mut rng, &mut g, &mut mc, 0.0)).unwrap()
             }
         }
-        for _ in 0..50 {
-            g2.clone_from(&g);
-            mc_iteration(&mut rng, &mut g2, &mut mc);
-        }
+        g2.clone_from(&g);
+        mc_iteration(&mut rng, &mut g2, &mut mc);
     }
 }
 
