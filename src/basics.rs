@@ -2,6 +2,9 @@ use rand::{Rand, Rng};
 use std::mem;
 pub use self::Color::*;
 
+#[cfg(test)]
+use quickcheck::{Gen, Arbitrary};
+
 #[derive(Debug)]
 pub struct History {
     items: Vec<Space>,
@@ -120,5 +123,47 @@ impl Arbitrary for Color {
             Black => true,
             White => false
         }.shrink().map(|b| if b { Black } else { White }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use quickcheck::*;
+    use super::*;
+    use test::Bencher;
+    use rand;
+
+    #[test]
+    fn history_present_iff_added() {
+        fn test(xss: Vec<Vec<Space>>, new: Vec<Space>) -> TestResult {
+            if new.len() == 0 { return TestResult::discard() }
+            let mut h = History::new();
+            for xs in xss.iter() { if xs.len() != new.len() { return TestResult::discard() }; h.insert(xs.iter().cloned()); }
+            TestResult::from_bool(h.contains(new.iter().cloned()) == xss.contains(&new))
+        }
+        quickcheck(test as fn(Vec<Vec<Space>>, Vec<Space>) -> TestResult);
+    }
+
+    #[bench]
+    fn history_insert_1000(bench: &mut Bencher) {
+        let mut rng = rand::weak_rng();
+        bench.iter(|| {
+            let mut vs = Vec::<Vec<Option<Color>>>::with_capacity(1000);
+            for _ in 0..1000 { vs.push(rng.gen_iter().take(361).collect()) }
+            let mut h = History::new();
+            for v in vs.iter() { h.insert(v.iter().cloned()); }
+        });
+    }
+
+    #[bench]
+    fn hashset_insert_1000(bench: &mut Bencher) {
+        use std::collections::HashSet;
+        let mut rng = rand::weak_rng();
+        bench.iter(|| {
+            let mut vs = Vec::<Vec<Option<Color>>>::with_capacity(1000);
+            for _ in 0..1000 { vs.push(rng.gen_iter().take(361).collect()) }
+            let mut h = HashSet::new();
+            for v in vs.iter() { h.insert(v.clone()); }
+        });
     }
 }

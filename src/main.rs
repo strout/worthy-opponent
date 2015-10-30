@@ -1,3 +1,5 @@
+#![cfg_attr(test, feature(test))]
+
 extern crate rand;
 extern crate bit_set;
 extern crate vec_map;
@@ -21,9 +23,6 @@ mod ninemensmorris;
 use game::Game;
 
 const THINK_MS : u32 = 1000;
-
-#[cfg(test)]
-use quickcheck::*;
 
 #[derive(Debug)]
 struct MCTree {
