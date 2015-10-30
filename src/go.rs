@@ -9,8 +9,8 @@ use basics::*;
 
 #[derive(Debug)]
 struct BoardOf<T> {
-    dat: Vec<T>, // TODO tighten visibility
-    size: usize, // TODO tighten visibility
+    dat: Vec<T>,
+    size: usize,
     komi: f32
 }
 
