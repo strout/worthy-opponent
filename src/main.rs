@@ -88,7 +88,7 @@ fn mc_move<T: Rng>(rng: &mut T, mc: &MCTree, explore: f64) -> usize {
             count = 1;
         } else if score == best_score {
             count += 1;
-            if rng.gen_range(0, count) == 0 {
+            if rng.gen_weighted_bool(count) {
                 best = Some(p);
             }
         }
