@@ -155,7 +155,7 @@ impl Game for GoState {
     }
     fn legal_moves(&self) -> Vec<usize> {
         let max = self.0.size * self.0.size;
-        let mut moves = self.0.dat.iter().enumerate().filter(|&(_, x)| x.is_none()).map(|(i, _)| i).collect::<Vec<_>>();
+        let mut moves = self.0.dat.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(i) } else { None }).collect::<Vec<_>>();
         moves.push(max);
         moves
     }

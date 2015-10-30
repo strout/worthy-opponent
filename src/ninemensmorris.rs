@@ -112,7 +112,7 @@ impl Game for NineMensMorris {
             }
             let (mine, yours) = if self.current_player() == Black { (blacks, whites) } else { (whites, blacks) };
             let no_adjacent_moves = || {
-                let mut ss = self.board.iter().enumerate().filter(|&(_, &x)| x == Some(self.current_player())).map(|(i, _)| i);
+                let mut ss = self.board.iter().enumerate().filter_map(|(i, &x)| if x == Some(self.current_player()) { Some(i) } else { None });
                 ss.all(|s| ADJACENT_SPACES[s].iter().all(|&x| self.board[x].is_some()))
             };
             if yours <= 2 { Some(1.0) }
@@ -125,7 +125,7 @@ impl Game for NineMensMorris {
     fn legal_moves(&self) -> Vec<usize> {
         let mut ret = vec![];
         if self.turn < 18 {
-           for d in self.board.iter().enumerate().filter(|&(_, x)| x.is_none()).map(|(i, _)| i) {
+           for d in self.board.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(i) } else { None }) {
                if self.forms_mill(d) {
                    for r in self.removable_pieces().iter() {
                        ret.push(d + 24 * r);
@@ -136,8 +136,8 @@ impl Game for NineMensMorris {
            }
         } else {
            let c = Some(self.current_player());
-           for s in self.board.iter().enumerate().filter(|&(_, &x)| x == c).map(|(i, _)| i) {
-               for d in if self.board.iter().filter(|&&x| x == c).count() == 3 { self.board.iter().enumerate().filter(|&(_, &x)| x.is_none()).map(|(i, _)| i).collect() } else { self.adjacent_free(s) }.into_iter() {
+           for s in self.board.iter().enumerate().filter_map(|(i, &x)| if x == c { Some(i) } else { None }) {
+               for d in if self.board.iter().filter(|&&x| x == c).count() == 3 { self.board.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(i) } else { None }).collect() } else { self.adjacent_free(s) }.into_iter() {
                    if self.forms_mill_without(d, s) {
                        for r in self.removable_pieces().iter() {
                            ret.push(s + 24 * d + 24 * 24 * r);
