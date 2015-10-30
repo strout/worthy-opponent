@@ -145,7 +145,30 @@ mod tests {
     }
 
     #[bench]
-    fn history_insert_1000(bench: &mut Bencher) {
+    fn history_insert_1000_24(bench: &mut Bencher) {
+        let mut rng = rand::weak_rng();
+        bench.iter(|| {
+            let mut vs = Vec::<Vec<Option<Color>>>::with_capacity(1000);
+            for _ in 0..1000 { vs.push(rng.gen_iter().take(24).collect()) }
+            let mut h = History::new();
+            for v in vs.iter() { h.insert(v.iter().cloned()); }
+        });
+    }
+
+    #[bench]
+    fn hashset_insert_1000_24(bench: &mut Bencher) {
+        use std::collections::HashSet;
+        let mut rng = rand::weak_rng();
+        bench.iter(|| {
+            let mut vs = Vec::<Vec<Option<Color>>>::with_capacity(1000);
+            for _ in 0..1000 { vs.push(rng.gen_iter().take(24).collect()) }
+            let mut h = HashSet::new();
+            for v in vs.iter() { h.insert(v.clone()); }
+        });
+    }
+
+    #[bench]
+    fn history_insert_1000_19x19(bench: &mut Bencher) {
         let mut rng = rand::weak_rng();
         bench.iter(|| {
             let mut vs = Vec::<Vec<Option<Color>>>::with_capacity(1000);
@@ -156,7 +179,7 @@ mod tests {
     }
 
     #[bench]
-    fn hashset_insert_1000(bench: &mut Bencher) {
+    fn hashset_insert_1000_19x19(bench: &mut Bencher) {
         use std::collections::HashSet;
         let mut rng = rand::weak_rng();
         bench.iter(|| {
