@@ -28,12 +28,11 @@ const THINK_MS : u32 = 1000;
 struct MCTree {
     wins: f64,
     plays: usize,
-    reply_plays: usize,
     replies: Option<VecMap<MCTree>>
 }
 
 impl MCTree {
-    fn new() -> MCTree { MCTree { wins: 0.0, plays: 0, reply_plays: 0, replies: None } }
+    fn new() -> MCTree { MCTree { wins: 0.0, plays: 0, replies: None } }
     fn next(self: MCTree, mv: usize) -> MCTree {
         self.replies.and_then(|mut replies| {
             replies.remove(&mv)
@@ -55,7 +54,7 @@ fn mc_score(mc: &MCTree, lnt: f64, explore: f64) -> f64 {
 }
 
 fn print_mc(mc: &MCTree) {
-    let lnt = (mc.reply_plays as f64).ln_1p();
+    let lnt = (mc.plays as f64).ln();
     let explore = 2.0;
     if let Some(ref rs) = mc.replies {
         for (i, r) in rs.iter() {
@@ -66,21 +65,18 @@ fn print_mc(mc: &MCTree) {
 }
 
 fn mc_expand<G: Game>(mc: &mut MCTree, g: &G) {
-    if mc.replies.is_none() {
-        mc.replies = Some({
-            let mut reps = VecMap::new();
-            for m in g.legal_moves() {
-                reps.insert(m, MCTree::new());
-            }
-            reps
-        })
-    }
+    mc.replies = Some({
+        let mut reps = VecMap::new();
+        for m in g.legal_moves() {
+            reps.insert(m, MCTree::new());
+        }
+        reps
+    })
 }
 
-fn mc_move<T: Rng, G: Game>(rng: &mut T, g: &G, mc: &mut MCTree, explore: f64) -> usize {
-    mc_expand(mc, g);
-    let lnt = (mc.reply_plays as f64).ln_1p();
-    debug_assert_eq!(mc.reply_plays, mc.replies.as_ref().unwrap().iter().fold(0, |acc, (_, r)| acc + r.plays));
+fn mc_move<T: Rng>(rng: &mut T, mc: &MCTree, explore: f64) -> usize {
+    let lnt = (mc.plays as f64).ln();
+    debug_assert_eq!(mc.plays, mc.replies.as_ref().unwrap().iter().fold(0, |acc, (_, r)| acc + r.plays) + 1);
     let mut best_score = std::f64::NEG_INFINITY;
     let mut best = None;
     let mut count = 0;
@@ -101,37 +97,35 @@ fn mc_move<T: Rng, G: Game>(rng: &mut T, g: &G, mc: &mut MCTree, explore: f64) -
 }
 
 fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
+    debug_assert!(g.payoff().is_none());
     let mut flip = false;
     loop
     {
+        let mv = *rng.choose(&g.legal_moves()[..]).expect("Either 'payoff' or 'legal_moves' is lying.");
+        g.play(mv);
+        flip = !flip;
         match g.payoff() {
-            None => {
-                let mv = *rng.choose(&g.legal_moves()[..]).expect("Either 'payoff' or 'legal_moves' is lying.");
-                g.play(mv);
-                flip = !flip;
-            },
-            Some(p) => return if flip { 1.0 - p } else { p }
+            Some(p) => return if flip { 1.0 - p } else { p },
+            None => {}
         }
     }
 }
 
 fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree) -> f64 {
-    let mv = mc_move(rng, g, mc, 2.0);
-    mc.reply_plays += 1;
-    let mut reply = mc.get_mut(mv);
-    let expanding = reply.plays == 0;
-    g.play(mv);
-    let wr = 1.0 - (match g.payoff() {
+    let p = match g.payoff() {
         Some(p) => p,
-        None => if expanding {
+        None => if mc.replies.is_none() {
+            mc_expand(mc, g);
             play_out(rng, g)
         } else {
-            mc_iteration(rng, g, reply)
+            let mv = mc_move(rng, mc, 2.0);
+            g.play(mv);
+            1.0 - mc_iteration(rng, g, mc.get_mut(mv))
         }
-    });
-    reply.wins += wr;
-    reply.plays += 1;
-    wr
+    };
+    mc.wins += p;
+    mc.plays += 1;
+    p
 }
 
 enum Cmd { Move(usize), Gen }
@@ -153,7 +147,7 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>) {
                 if g.payoff().is_some() { return }
             }
             Ok(Cmd::Gen) => {
-                mvs.send(mc_move(&mut rng, &mut g, &mut mc, 0.0)).unwrap()
+                mvs.send(mc_move(&mut rng, &mc, 0.0)).unwrap()
             }
         }
         g2.clone_from(&g);
