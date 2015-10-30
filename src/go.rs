@@ -1,4 +1,4 @@
-const DEFAULT_SIZE : usize = 19;
+const DEFAULT_SIZE : usize = 9;
 const DEFAULT_KOMI : f32 = 7.5;
 
 use std::io;
@@ -289,7 +289,7 @@ mod tests {
 #[bench]
     fn play_out_bench(bench: &mut Bencher) {
         let mut rng = rand::weak_rng();
-        bench.iter(|| play_out(&mut rng, Black, false, &mut make_board(19, 7.5)));
+        bench.iter(|| play_out(&mut rng, Black, false, &mut make_board(DEFAULT_SIZE, DEFAULT_KOMI)));
     }
 }
 
@@ -297,7 +297,7 @@ pub type GoState = (Board, History, Color, usize);
 
 impl Game for GoState {
     fn init() -> GoState {
-        (make_board(19, 0.0), History::new(), Black, 0)
+        (make_board(DEFAULT_SIZE, 0.0), History::new(), Black, 0)
     }
     fn payoff(&self) -> Option<f64> {
         if self.3 > 1 {
