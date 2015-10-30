@@ -39,9 +39,9 @@ impl MCTree {
         }).unwrap_or(MCTree::new())
     }
     // this can panic; only do it for legal moves
-    fn get_mut(self: &mut MCTree, mv: usize) -> &mut MCTree {
+    fn get_mut(self: &mut MCTree, mv: &usize) -> Option<&mut MCTree> {
         let replies = self.replies.as_mut().unwrap();
-        &mut replies[mv]
+        replies.get_mut(mv)
     }
 }
 
@@ -112,7 +112,7 @@ fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
 }
 
 fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree) -> f64 {
-    let p = match g.payoff() {
+    let p = 1.0 - match g.payoff() {
         Some(p) => p,
         None => if mc.replies.is_none() {
             mc_expand(mc, g);
@@ -120,7 +120,7 @@ fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree) -> f64
         } else {
             let mv = mc_move(rng, mc, 2.0);
             g.play(mv);
-            1.0 - mc_iteration(rng, g, mc.get_mut(mv))
+            mc_iteration(rng, g, mc.get_mut(&mv).unwrap())
         }
     };
     mc.wins += p;

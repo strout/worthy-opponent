@@ -101,17 +101,24 @@ impl Game for NineMensMorris {
         if self.turn < 18 {
             None
         } else {
-            let mine = Some(self.current_player());
-            let yours = Some(self.current_player().enemy());
-            let mut n_mine = 0;
-            let mut n_yours = 0;
+            let mut blacks = 0;
+            let mut whites = 0;
             for &x in self.board.iter() {
-                if x == mine { n_mine+= 1 }
-                else if x == yours { n_yours+= 1 }
+                match x {
+                    Some(Black) => blacks += 1,
+                    Some(White) => whites += 1,
+                    _ => {}
+                }
             }
-            if n_yours <= 2 { Some(1.0) }
-            else if n_mine <= 2 || self.legal_moves().is_empty() { Some(0.0) }
-            else if self.history.contains(self.board.iter().cloned()) { Some(0.5) }
+            let (mine, yours) = if self.current_player() == Black { (blacks, whites) } else { (whites, blacks) };
+            let no_adjacent_moves = || {
+                let mut ss = self.board.iter().enumerate().filter(|&(_, &x)| x == Some(self.current_player())).map(|(i, _)| i);
+                ss.all(|s| ADJACENT_SPACES[s].iter().all(|&x| self.board[x].is_some()))
+            };
+            if yours <= 2 { Some(1.0) }
+            else if mine <= 2 { Some(0.0) }
+            else if mine > 3 && no_adjacent_moves() { Some(0.0) }
+            else if self.history.contains(self.board.iter()) { Some(0.5) }
             else { None }
         }
     }

@@ -28,9 +28,9 @@ impl Clone for History {
 impl History {
     pub fn new() -> History { History { items: Vec::new(), black: None, white: None, none: None } }
     pub fn from_iter<I>(iter: I) -> History where I: Iterator<Item=Space> { History { items: iter.collect(), black: None, white: None, none: None } }
-    pub fn contains<I>(mut self: &History, iter: I) -> bool where I: Iterator<Item=Space> {
+    pub fn contains<'a, I>(mut self: &History, iter: I) -> bool where I: Iterator<Item=&'a Space> {
         let mut i = 0;
-        for item in iter {
+        for &item in iter {
             match self.items.get(i) {
                 Some(&s) => {
                     if item != s { return false }
@@ -39,12 +39,12 @@ impl History {
                 None => { // go to next
                     let branch = match item {
                         None => &self.none,
-                             Some(Black) => &self.black,
-                             Some(White) => &self.white
+                        Some(Black) => &self.black,
+                        Some(White) => &self.white
                     };
                     match *branch {
                         None => return false,
-                             Some(ref h2) => { self = h2 }
+                        Some(ref h2) => { self = h2 }
                     }
                     i = 0
                 }
