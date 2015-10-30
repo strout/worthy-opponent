@@ -1,12 +1,12 @@
 use game::Game;
+use basics::*;
 use bit_set::BitSet;
-use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
 pub struct NineMensMorris {
-    board: [Option<bool>; 24],
+    board: [Space; 24],
     turn: usize,
-    history: HashSet<[Option<bool>; 24]>
+    history: History
 }
 
 static MILLS : [[usize; 3]; 16] = [
@@ -73,7 +73,7 @@ static ADJACENT_SPACES : [&'static [usize]; 24] = [
 ];
 
 impl NineMensMorris {
-    fn current_player(&self) -> bool { self.turn % 2 == 0 }
+    fn current_player(&self) -> Color { if self.turn % 2 == 0 { Black } else { White } }
     fn forms_mill(&self, x: usize) -> bool { self.possible_mills_for(x).len() > 0 }
     fn forms_mill_without(&self, x: usize, y: usize) -> bool { self.possible_mills_for(x).iter().filter(|m| !m.contains(&y)).count() > 0 }
     fn possible_mills_for(&self, x: usize) -> Vec<&'static [usize; 2]> {
@@ -81,7 +81,7 @@ impl NineMensMorris {
         MILLS_BY_SPACE[x].iter().filter(|m| m.iter().all(|&y| c == self.board[y])).collect()
     }
     fn removable_pieces(&self) -> BitSet {
-        let c = Some(!self.current_player());
+        let c = Some(self.current_player().enemy());
         let mut in_mills = BitSet::with_capacity(24);
         let mut out_of_mills = BitSet::with_capacity(24);
         for i in 0..self.board.len() {
@@ -104,14 +104,14 @@ impl NineMensMorris {
 
 impl Game for NineMensMorris {
     fn init() -> NineMensMorris {
-        NineMensMorris { board: [None; 24], turn: 0, history: HashSet::new() }
+        NineMensMorris { board: [None; 24], turn: 0, history: History::new() }
     }
     fn payoff(&self) -> Option<f64> {
         if self.turn < 18 {
             None
         } else {
             let mine = Some(self.current_player());
-            let yours = Some(!self.current_player());
+            let yours = Some(self.current_player().enemy());
             let mut n_mine = 0;
             let mut n_yours = 0;
             for &x in self.board.iter() {
@@ -120,7 +120,7 @@ impl Game for NineMensMorris {
             }
             if n_yours <= 2 { Some(1.0) }
             else if n_mine <= 2 || self.legal_moves().is_empty() { Some(0.0) }
-            else if self.history.contains(&self.board) { Some(0.5) }
+            else if self.history.contains(self.board.iter().cloned()) { Some(0.5) }
             else { None }
         }
     }
@@ -161,7 +161,7 @@ impl Game for NineMensMorris {
             }
             self.board[d] = Some(self.current_player());
         } else {
-            self.history.insert(self.board.clone());
+            self.history.insert(self.board.iter().cloned());
             let s = act % 24;
             let rd = act / 24;
             let d = rd % 24;
@@ -175,7 +175,7 @@ impl Game for NineMensMorris {
         self.turn += 1;
     }
     fn print(&self) {
-        let disp = |x| match x { None => ' ', Some(true) => 'X', Some(false) => 'O' };
+        let disp = |x| match x { None => ' ', Some(Black) => 'X', Some(White) => 'O' };
         println!("{}----{}----{}", disp(self.board[0]), disp(self.board[1]), disp(self.board[2]));
         println!("|         |");
         println!("| {}--{}--{} |", disp(self.board[3]), disp(self.board[4]), disp(self.board[5]));
