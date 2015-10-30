@@ -56,7 +56,7 @@ fn mc_score(mc: &MCTree, lnt: f64, explore: f64) -> f64 {
 
 fn print_mc(mc: &MCTree) {
     let lnt = (mc.reply_plays as f64).ln_1p();
-    let explore = 2.0f64.sqrt();
+    let explore = 2.0;
     if let Some(ref rs) = mc.replies {
         for (i, r) in rs.iter() {
             println!("{} => {:.5} / {:.5} / {}", i, r.wins / r.plays as f64, mc_score(r, lnt, explore), r.plays)
@@ -116,7 +116,7 @@ fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
 }
 
 fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree) -> f64 {
-    let mv = mc_move(rng, g, mc, 2.0f64.sqrt());
+    let mv = mc_move(rng, g, mc, 2.0);
     mc.reply_plays += 1;
     let mut reply = mc.get_mut(mv);
     let expanding = reply.plays == 0;
