@@ -13,6 +13,7 @@ use vec_map::VecMap;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 use rand::Rng;
+use std::io;
 
 mod game;
 mod basics;
@@ -21,8 +22,6 @@ mod tictactoe;
 mod ninemensmorris;
 
 use game::Game;
-
-const THINK_MS : u32 = 1000;
 
 #[derive(Debug)]
 struct MCTree {
@@ -128,6 +127,7 @@ fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree) -> f64
     p
 }
 
+#[derive(PartialEq, Clone, Copy)]
 enum Cmd { Move(usize), Gen }
 
 fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>) {
@@ -147,7 +147,11 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>) {
                 if g.payoff().is_some() { return }
             }
             Ok(Cmd::Gen) => {
-                mvs.send(mc_move(&mut rng, &mc, 0.0)).unwrap()
+                if mc.plays > 0 {
+                    mvs.send(mc_move(&mut rng, &mc, 0.0)).unwrap()
+                } else {
+                    mvs.send(*rng.choose(&g.legal_moves()[..]).expect("Last-ditch effort to pick a move failed.")).unwrap();
+                }
             }
         }
         g2.clone_from(&g);
@@ -155,30 +159,45 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>) {
     }
 }
 
-fn main() {
+fn parse_command<G: Game>(string: &str) -> Cmd {
+    match string.trim() {
+        "gen" => Cmd::Gen,
+        x => Cmd::Move(G::parse_move(x))
+    }
+}
+
+fn run<G: Game>() {
     let (sendcmd, recvcmd) = channel();
     let (sendmv, recvmv) = channel();
-    let game = std::env::args().nth(1).expect("Please supply a game (t = Tic-Tac-Toe, n = Nine Men's Morris, g = Go)");
-    thread::spawn(move || match game.as_ref() {
-        "t" => think::<tictactoe::TicTacToe>(recvcmd, sendmv),
-        "n" => think::<ninemensmorris::NineMensMorris>(recvcmd, sendmv),
-        "g" => think::<go::GoState>(recvcmd, sendmv),
-        x => panic!("I don't know how to play '{}'.", x)
-    });
+    thread::spawn(move || think::<G>(recvcmd, sendmv));
     loop {
-        thread::sleep_ms(THINK_MS);
-        match sendcmd.send(Cmd::Gen) {
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).unwrap();
+        let cmd = parse_command::<G>(&input);
+        match sendcmd.send(cmd) {
             Err(_) => return,
             _ => {}
         }
-        let mv = match recvmv.recv() {
-            Ok(mv) => mv,
-            Err(_) => return
-        };
-        println!("{}", mv);
-        match sendcmd.send(Cmd::Move(mv)) {
-           Err(_) => return,
-           _ => {}
+        if cmd == Cmd::Gen {
+            let mv = match recvmv.recv() {
+                Ok(mv) => mv,
+                Err(_) => return
+            };
+            println!("!{}", mv);
+            match sendcmd.send(Cmd::Move(mv)) {
+               Err(_) => return,
+               _ => {}
+            }
         }
+    }
+}
+
+fn main() {
+    let game = std::env::args().nth(1).expect("Please supply a game (t = Tic-Tac-Toe, n = Nine Men's Morris, g = Go)");
+    match game.as_ref() {
+        "t" => run::<tictactoe::TicTacToe>(),
+        "n" => run::<ninemensmorris::NineMensMorris>(),
+        "g" => run::<go::GoState>(),
+        x => panic!("I don't know how to play '{}'.", x)
     }
 }
