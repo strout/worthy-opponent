@@ -1,15 +1,16 @@
 use game::Game;
+use basics::*;
 
 #[derive(Clone, Debug)]
 pub struct TicTacToe {
-    board: [Option<bool>; 9],
-    current: bool
+    board: [Space; 9],
+    current: Color
 }
 
 static GROUPS : [[usize; 3]; 8] = [[0,1,2], [3,4,5], [6,7,8], [0,3,6], [1,4,7], [2,5,8], [0,4,8], [2,4,6]];
 
 impl TicTacToe {
-    fn winner(&self) -> Option<bool> {
+    fn winner(&self) -> Option<Color> {
        for grp in GROUPS.iter() {
            let x = self.board[grp[0]];
            if x.is_some() && x == self.board[grp[1]] && x == self.board[grp[2]] { return x }
@@ -20,7 +21,7 @@ impl TicTacToe {
 
 impl Game for TicTacToe {
     fn init() -> TicTacToe {
-       TicTacToe { board: [None; 9], current: true }
+       TicTacToe { board: [None; 9], current: Black }
     }
     fn payoff(&self) -> Option<f64> {
        match self.winner() {
@@ -33,10 +34,10 @@ impl Game for TicTacToe {
     }
     fn play(&mut self, act: usize) {
        self.board[act] = Some(self.current);
-       self.current = !self.current;
+       self.current = self.current.enemy();
     }
     fn print(&self) {
-       let disp = |x| match x { None => ' ', Some(true) => 'X', Some(false) => 'O' };
+       let disp = |x| match x { None => ' ', Some(Black) => 'X', Some(White) => 'O' };
        println!("{}|{}|{}", disp(self.board[0]), disp(self.board[1]), disp(self.board[2]));
        println!("-+-+-");
        println!("{}|{}|{}", disp(self.board[3]), disp(self.board[4]), disp(self.board[5]));
