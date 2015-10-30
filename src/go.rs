@@ -90,11 +90,7 @@ fn capture(c: Color, p: Pos, b: &Board) -> BitSet {
     }
 }
 
-fn play(c: Color, mv: Option<Pos>, board: &mut Board, h: &mut History) -> bool {
-    let p = match mv {
-        None => return true,
-             Some(p) => p
-    };
+fn play(c: Color, p: Pos, board: &mut Board, h: &mut History) -> bool {
     if board.dat[p].is_some() { return false }
     board.dat[p] = Some(c);
     let oc = c.enemy();
@@ -169,7 +165,7 @@ impl Game for GoState {
             self.3 += 1
         } else {
             self.3 = 0;
-            self.4 = !play(self.2, Some(act), &mut self.0, &mut self.1);
+            self.4 = !play(self.2, act, &mut self.0, &mut self.1);
         }
         self.2 = self.2.enemy();
     }
