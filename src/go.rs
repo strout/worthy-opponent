@@ -3,6 +3,7 @@ const DEFAULT_SIZE : usize = 9;
 use bit_set::BitSet;
 use game::Game;
 use basics::*;
+use rand::distributions::Weighted;
 
 #[derive(Debug)]
 struct BoardOf<T> {
@@ -110,6 +111,18 @@ fn play(c: Color, p: Pos, board: &mut Board, h: &mut History) -> bool {
     ok
 }
 
+fn weigh_move(c: Color, p: Pos, board: &Board) -> u32 {
+    let oc = Some(c.enemy());
+    if !neighbors(p, board.size).into_iter().all(|&mp| match mp {
+        None => true,
+        Some(p) => board.dat[p] == oc
+    }) {
+        1
+    } else {
+        2
+    }
+}
+
 const UPPER_LETTERS : &'static str = "ABCDEFGHJKLMNOPQRSTUVWXYZ";
 
 fn to_letter(n : usize) -> char {
@@ -153,10 +166,10 @@ impl Game for GoState {
             else { Some(1.0) }
         } else { None }
     }
-    fn legal_moves(&self) -> Vec<usize> {
+    fn legal_moves(&self) -> Vec<Weighted<usize>> {
         let max = self.0.size * self.0.size;
-        let mut moves = self.0.dat.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(i) } else { None }).collect::<Vec<_>>();
-        moves.push(max);
+        let mut moves = self.0.dat.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(Weighted { weight: weigh_move(self.2, i, &self.0), item: i }) } else { None }).collect::<Vec<_>>();
+        moves.push(Weighted { weight: 1, item: max });
         moves
     }
     fn play(&mut self, act: usize) {

@@ -13,6 +13,7 @@ use vec_map::VecMap;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 use rand::Rng;
+use rand::distributions::{Weighted, WeightedChoice, IndependentSample};
 
 mod game;
 mod basics;
@@ -22,7 +23,7 @@ mod ninemensmorris;
 
 use game::Game;
 
-const THINK_MS : u32 = 1000;
+const THINK_MS : u32 = 10000;
 
 #[derive(Debug)]
 struct MCTree {
@@ -67,7 +68,7 @@ fn print_mc(mc: &MCTree) {
 fn mc_expand<G: Game>(mc: &mut MCTree, g: &G) {
     mc.replies = Some({
         let mut reps = VecMap::new();
-        for m in g.legal_moves() {
+        for Weighted { item: m, .. } in g.legal_moves() {
             reps.insert(m, MCTree::new());
         }
         reps
@@ -101,7 +102,9 @@ fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
     let mut flip = false;
     loop
     {
-        let mv = *rng.choose(&g.legal_moves()[..]).expect("Either 'payoff' or 'legal_moves' is lying.");
+        let mut moves = g.legal_moves();
+        let dist = WeightedChoice::new(&mut moves[..]);
+        let mv = dist.ind_sample(rng);
         g.play(mv);
         flip = !flip;
         match g.payoff() {
