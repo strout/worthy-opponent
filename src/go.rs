@@ -113,6 +113,7 @@ const DOWN_LETTERS : &'static str = "abcdefghjklmnopqrstuvwxyz";
  
 fn parse_pos(s: &str) -> Option<Pos> {
     if s.len() < 1 { return None }
+    if s == "XX" || s == "xx" { return Some(SIZE * SIZE) }
     let y = s[1..].parse::<usize>().ok();
     let xch = s.chars().nth(0);
     xch.and_then(|xch| y.and_then(|y| UPPER_LETTERS.chars().position(|c| c == xch).or_else(|| DOWN_LETTERS.chars().position(|c| c == xch)).map(|x| (y - 1) * SIZE + x)))
