@@ -1,4 +1,4 @@
-const DEFAULT_SIZE : usize = 9;
+const SIZE : usize = 9;
 
 use bit_set::BitSet;
 use game::Game;
@@ -8,17 +8,15 @@ use rand::distributions::Weighted;
 #[derive(Debug)]
 struct BoardOf<T> {
     dat: Vec<T>,
-    size: usize,
     komi: f32
 }
 
 impl<T: Clone> Clone for BoardOf<T> {
     fn clone(self: &BoardOf<T>) -> BoardOf<T> {
-        BoardOf { dat: self.dat.clone(), size: self.size, komi: self.komi }
+        BoardOf { dat: self.dat.clone(), komi: self.komi }
     }
     fn clone_from(self: &mut BoardOf<T>, other: &BoardOf<T>) {
         self.dat.clone_from(&other.dat);
-        self.size = other.size;
         self.komi = other.komi;
     }
 }
@@ -27,11 +25,11 @@ type Board = BoardOf<Space>;
 
 type Pos = usize;
 
-fn neighbors(p: Pos, sz: usize) -> [Option<usize>; 4] {
-    [if p % sz > 0 { Some(p - 1) } else { None },
-        if p % sz < sz - 1 { Some(p + 1) } else { None },
-            if p / sz > 0 { Some(p - sz) } else { None },
-                if p / sz < sz - 1 { Some(p + sz) } else { None }]
+fn neighbors(p: Pos) -> [Option<usize>; 4] {
+    [if p % SIZE > 0 { Some(p - 1) } else { None },
+        if p % SIZE < SIZE - 1 { Some(p + 1) } else { None },
+            if p / SIZE > 0 { Some(p - SIZE) } else { None },
+                if p / SIZE < SIZE - 1 { Some(p + SIZE) } else { None }]
 }
 
 fn owner_inner(c: Space, p: Pos, b: &Board, visited: &mut BitSet, white: bool, black: bool) -> (bool, bool, usize) {
@@ -46,7 +44,7 @@ fn owner_inner(c: Space, p: Pos, b: &Board, visited: &mut BitSet, white: bool, b
         if visited.contains(&p) { return (black, white, 0) }
         visited.insert(p);
         let mut sum = 0;
-        for &p in neighbors(p, b.size).into_iter().flat_map(|x| x) {
+        for &p in neighbors(p).into_iter().flat_map(|x| x) {
             let (b, w, s) = owner_inner(c, p, b, visited, white, black);
             black = b;
             white = w;
@@ -59,8 +57,8 @@ fn owner_inner(c: Space, p: Pos, b: &Board, visited: &mut BitSet, white: bool, b
 fn score(board: &Board) -> (f32, f32) {
     let mut b : f32 = 0.0;
     let mut w : f32 = 0.0;
-    let mut visited = BitSet::with_capacity(board.size * board.size);
-    for p in 0..board.size * board.size {
+    let mut visited = BitSet::with_capacity(SIZE * SIZE);
+    for p in 0..SIZE * SIZE {
         if !visited.contains(&p) {
             match owner_inner(board.dat[p], p, board, &mut visited, false, false) {
                 (true, false, n) => b += n as f32,
@@ -73,7 +71,7 @@ fn score(board: &Board) -> (f32, f32) {
 }
 
 fn capture(c: Color, p: Pos, b: &Board) -> BitSet {
-    let mut captured = BitSet::with_capacity(b.size * b.size);
+    let mut captured = BitSet::with_capacity(SIZE * SIZE);
     let mut stack = vec![p];
     loop {
         match stack.pop() {
@@ -83,7 +81,7 @@ fn capture(c: Color, p: Pos, b: &Board) -> BitSet {
                          None => return BitSet::new(),
                          Some(c2) => if c == c2 {
                              captured.insert(p);
-                             stack.extend(neighbors(p, b.size).iter().filter_map(Option::clone))
+                             stack.extend(neighbors(p).iter().filter_map(Option::clone))
                          }
                      }
                  }
@@ -95,8 +93,8 @@ fn play(c: Color, p: Pos, board: &mut Board, h: &mut History) -> bool {
     if board.dat[p].is_some() { return false }
     board.dat[p] = Some(c);
     let oc = c.enemy();
-    let mut captured = BitSet::with_capacity(board.size * board.size);
-    for &p in neighbors(p, board.size).into_iter().flat_map(|x| x) {
+    let mut captured = BitSet::with_capacity(SIZE * SIZE);
+    for &p in neighbors(p).into_iter().flat_map(|x| x) {
         captured.union_with(&capture(oc, p, &board))
     }
     for p in captured.iter() { board.dat[p] = None; }
@@ -113,7 +111,7 @@ fn play(c: Color, p: Pos, board: &mut Board, h: &mut History) -> bool {
 
 fn weigh_move(c: Color, p: Pos, board: &Board) -> u32 {
     let oc = Some(c.enemy());
-    if !neighbors(p, board.size).into_iter().all(|&mp| match mp {
+    if !neighbors(p).into_iter().all(|&mp| match mp {
         None => true,
         Some(p) => board.dat[p] == oc
     }) {
@@ -124,37 +122,49 @@ fn weigh_move(c: Color, p: Pos, board: &Board) -> u32 {
 }
 
 const UPPER_LETTERS : &'static str = "ABCDEFGHJKLMNOPQRSTUVWXYZ";
+const DOWN_LETTERS : &'static str = "abcdefghjklmnopqrstuvwxyz";
+ 
+fn parse_pos(s: &str) -> Option<Pos> {
+    if s.len() < 1 { return None }
+    let y = s[1..].parse::<usize>().ok();
+    let xch = s.chars().nth(0);
+    xch.and_then(|xch| y.and_then(|y| UPPER_LETTERS.chars().position(|c| c == xch).or_else(|| DOWN_LETTERS.chars().position(|c| c == xch)).map(|x| (y - 1) * SIZE + x)))
+}
 
 fn to_letter(n : usize) -> char {
     UPPER_LETTERS.chars().nth(n).unwrap()
 }
 
+fn print_pos(p: usize) {
+    if p == SIZE * SIZE { print!("XX") } else { print!("{}{}", to_letter(p % SIZE), 1 + p / SIZE); }
+}
+
 fn print_board(b: &Board) {
     print!("   ");
-    for i in 0..b.size { print!("{} ", to_letter(i)) };
+    for i in 0..SIZE { print!("{} ", to_letter(i)) };
     println!("");
-    for y in (0..b.size).rev() {
+    for y in (0..SIZE).rev() {
         print!("{: >2} ", y + 1);
-        for x in 0..b.size {
-            print!("{} ", match b.dat[x + y * b.size] { None => '.', Some(Black) => 'X', Some(White) => 'O'});
+        for x in 0..SIZE {
+            print!("{} ", match b.dat[x + y * SIZE] { None => '.', Some(Black) => 'X', Some(White) => 'O'});
         }
         println!("{}", y + 1);
     }
     print!("   ");
-    for i in 0..b.size { print!("{} ", to_letter(i)) };
+    for i in 0..SIZE { print!("{} ", to_letter(i)) };
     println!("");
 }
 
-fn make_board(sz: usize, komi: f32) -> Board {
-    let len = sz * sz;
-    BoardOf { dat: vec![None; len], size: sz, komi: komi }
+fn make_board(komi: f32) -> Board {
+    let len = SIZE * SIZE;
+    BoardOf { dat: vec![None; len], komi: komi }
 }
 
 pub type GoState = (Board, History, Color, usize, bool);
 
 impl Game for GoState {
     fn init() -> GoState {
-        (make_board(DEFAULT_SIZE, 0.0), History::new(), Black, 0, false)
+        (make_board(0.0), History::new(), Black, 0, false)
     }
     fn payoff(&self) -> Option<f64> {
         if self.4 {
@@ -167,14 +177,13 @@ impl Game for GoState {
         } else { None }
     }
     fn legal_moves(&self) -> Vec<Weighted<usize>> {
-        let max = self.0.size * self.0.size;
+        let max = SIZE * SIZE;
         let mut moves = self.0.dat.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(Weighted { weight: weigh_move(self.2, i, &self.0), item: i }) } else { None }).collect::<Vec<_>>();
         moves.push(Weighted { weight: 1, item: max });
         moves
     }
     fn play(&mut self, act: usize) {
-        let sz = self.0.size;
-        if act >= sz * sz {
+        if act >= SIZE * SIZE {
             self.3 += 1
         } else {
             self.3 = 0;
@@ -185,4 +194,8 @@ impl Game for GoState {
     fn print(&self) {
         print_board(&self.0);
     }
+    fn parse_move(string: &str) -> usize {
+        parse_pos(string).expect("Bad move.")
+    }
+    fn print_move(mv: usize) { print_pos(mv) }
 }
