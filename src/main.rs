@@ -64,13 +64,15 @@ fn print_mc(mc: &MCTree) {
 }
 
 fn mc_expand<G: Game>(mc: &mut MCTree, g: &G) {
-    mc.replies = Some({
-        let mut reps = VecMap::new();
-        for m in g.legal_moves() {
-            reps.insert(m, MCTree::new());
-        }
-        reps
-    })
+    if mc.replies.is_none() {
+        mc.replies = Some({
+            let mut reps = VecMap::new();
+            for m in g.legal_moves() {
+                reps.insert(m, MCTree::new());
+            }
+            reps
+        })
+    }
 }
 
 fn mc_move<T: Rng>(rng: &mut T, mc: &MCTree, explore: f64) -> usize {
@@ -113,10 +115,10 @@ fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
 fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree) -> f64 {
     let p = 1.0 - match g.payoff() {
         Some(p) => p,
-        None => if mc.replies.is_none() {
-            mc_expand(mc, g);
+        None => if mc.plays == 0 {
             play_out(rng, g)
         } else {
+            mc_expand(mc, g);
             let mv = mc_move(rng, mc, 2.0);
             g.play(mv);
             mc_iteration(rng, g, mc.get_mut(&mv).unwrap())
