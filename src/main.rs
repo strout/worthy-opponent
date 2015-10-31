@@ -1,5 +1,7 @@
 #![cfg_attr(test, feature(test))]
 
+const THINK_TIME: u32 = 1000;
+
 extern crate rand;
 extern crate bit_set;
 extern crate vec_map;
@@ -184,6 +186,7 @@ fn run<G: Game>() {
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
         let cmd = parse_command::<G>(&input);
+        if cmd == Cmd::Gen { thread::sleep_ms(THINK_TIME) }
         match sendcmd.send(cmd) {
             Err(_) => return,
             _ => {}
