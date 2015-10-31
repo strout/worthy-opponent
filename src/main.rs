@@ -52,12 +52,13 @@ fn mc_score(mc: &MCTree, lnt: f64, explore: f64) -> f64 {
     }
 }
 
-fn print_mc(mc: &MCTree) {
+fn print_mc<G: Game>(mc: &MCTree) {
     let lnt = (mc.plays as f64).ln();
     let explore = 2.0;
     if let Some(ref rs) = mc.replies {
         for (i, r) in rs.iter() {
-            println!("{} => {:.5} / {:.5} / {}", i, r.wins / r.plays as f64, mc_score(r, lnt, explore), r.plays)
+            G::print_move(i);
+            println!(" => {:.5} / {:.5} / {}", r.wins / r.plays as f64, mc_score(r, lnt, explore), r.plays)
         }
     }
     println!("");
@@ -142,7 +143,7 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>) {
             Err(TryRecvError::Empty) => {},
             Err(TryRecvError::Disconnected) => return,
             Ok(Cmd::Move(mv)) => {
-                print_mc(&mc);
+                print_mc::<G>(&mc);
                 mc = mc.next(mv);
                 g.play(mv);
                 g.print();
@@ -185,7 +186,9 @@ fn run<G: Game>() {
                 Ok(mv) => mv,
                 Err(_) => return
             };
-            println!("!{}", mv);
+            print!("!");
+            G::print_move(mv);
+            println!("");
             match sendcmd.send(Cmd::Move(mv)) {
                Err(_) => return,
                _ => {}

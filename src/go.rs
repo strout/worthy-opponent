@@ -122,6 +122,10 @@ fn to_letter(n : usize) -> char {
     UPPER_LETTERS.chars().nth(n).unwrap()
 }
 
+fn print_pos(p: usize) {
+    if p == SIZE * SIZE { print!("XX") } else { print!("{}{}", to_letter(p % SIZE), 1 + p / SIZE); }
+}
+
 fn print_board(b: &Board) {
     print!("   ");
     for i in 0..SIZE { print!("{} ", to_letter(i)) };
@@ -180,4 +184,5 @@ impl Game for GoState {
     fn parse_move(string: &str) -> usize {
         parse_pos(string).expect("Bad move.")
     }
+    fn print_move(mv: usize) { print_pos(mv) }
 }

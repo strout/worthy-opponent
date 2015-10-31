@@ -7,4 +7,7 @@ pub trait Game : Clone {
     fn parse_move(string: &str) -> usize {
         string.parse().unwrap()
     }
+    fn print_move(mv: usize) {
+        print!("{}", mv)
+    }
 }
