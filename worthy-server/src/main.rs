@@ -22,16 +22,18 @@ fn main() {
     player1.write(b"gen\n").unwrap();
     player1.flush().unwrap();
 
-    spawn(move || relay(p1_in, &mut player2));
-    relay(p2_in, &mut player1);
+    spawn(move || relay(p1_in, &mut player2, "p1"));
+    relay(p2_in, &mut player1, "p2");
 }
 
-fn relay<R: BufRead, W: Write>(r: R, w: &mut W) {
+fn relay<R: BufRead, W: Write>(r: R, w: &mut W, prefix: &str) {
     for line in r.lines().flat_map(|x| x) {
         if line.starts_with("!") {
             w.write(line[1..].as_bytes()).unwrap();
             w.write(b"\ngen\n").unwrap();
             w.flush().unwrap();
+        } else {
+            println!("{}: {}", prefix, line);
         }
     }
 }
