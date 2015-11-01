@@ -144,7 +144,7 @@ fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree) -> f64
 #[derive(PartialEq, Clone, Copy)]
 enum Cmd { Move(usize), Gen }
 
-fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>) {
+fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>, dones: Sender<bool>) {
     let mut rng = rand::weak_rng();
     let mut g = G::init();
     let mut mc = MCTree::new(0.5);
@@ -157,14 +157,22 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>) {
                 mc = mc.next(mv);
                 g.play(mv);
                 g.print();
-                if g.payoff().is_some() { return }
+                let done = g.payoff().is_some();
+                dones.send(done).unwrap();
+                if done { return }
             }
             Ok(Cmd::Gen) => {
-                if mc.replies.is_some() {
-                    mvs.send(mc_move(&mut rng, &mc, 0.0)).unwrap()
+                let mv = if mc.replies.is_some() {
+                    mc_move(&mut rng, &mc, 0.0)
                 } else {
-                    mvs.send(random_move(&mut rng, &g)).unwrap();
-                }
+                    random_move(&mut rng, &g)
+                };
+                mc = mc.next(mv);
+                g.play(mv);
+                let done = g.payoff().is_some();
+                mvs.send(mv).unwrap();
+                dones.send(done).unwrap();
+                if done { return }
             }
         }
         g2.clone_from(&g);
@@ -182,29 +190,21 @@ fn parse_command<G: Game>(string: &str) -> Cmd {
 fn run<G: Game>(think_time: u32) {
     let (sendcmd, recvcmd) = channel();
     let (sendmv, recvmv) = channel();
-    thread::spawn(move || think::<G>(recvcmd, sendmv));
+    let (senddone, recvdone) = channel();
+    thread::spawn(move || think::<G>(recvcmd, sendmv, senddone));
     loop {
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
         let cmd = parse_command::<G>(&input);
         if cmd == Cmd::Gen { thread::sleep_ms(think_time) }
-        match sendcmd.send(cmd) {
-            Err(_) => return,
-            _ => {}
-        }
+        sendcmd.send(cmd).unwrap();
         if cmd == Cmd::Gen {
-            let mv = match recvmv.recv() {
-                Ok(mv) => mv,
-                Err(_) => return
-            };
+            let mv = recvmv.recv().unwrap();
             print!("!");
             G::print_move(mv);
             println!("");
-            match sendcmd.send(Cmd::Move(mv)) {
-               Err(_) => return,
-               _ => {}
-            }
         }
+        if recvdone.recv().unwrap() { return }
     }
 }
 
