@@ -10,7 +10,6 @@ lto = true
 [dependencies]
 rand = "*"
 bit-set = "*"
-vec_map = "*"
 
 [dev-dependencies]
 quickcheck = "*"

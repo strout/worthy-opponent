@@ -2,7 +2,6 @@
 
 extern crate rand;
 extern crate bit_set;
-extern crate vec_map;
 
 #[cfg(test)]
 extern crate test;
