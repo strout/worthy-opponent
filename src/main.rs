@@ -9,7 +9,6 @@ extern crate test;
 #[cfg(test)]
 extern crate quickcheck;
 
-use vec_map::VecMap;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 use rand::Rng;
@@ -29,20 +28,16 @@ struct MCTree {
     wins: f64,
     plays: usize,
     urgency: u32,
-    replies: Option<VecMap<MCTree>>
+    replies: Option<Vec<(usize, MCTree)>>
 }
 
 impl MCTree {
     fn new(urgency: u32) -> MCTree { MCTree { wins: 0.0, plays: 0, replies: None, urgency: urgency } }
     fn next(self: MCTree, mv: usize) -> MCTree {
-        self.replies.and_then(|mut replies| {
-            replies.remove(&mv)
+        self.replies.map(|mut replies| {
+            let idx = replies.iter().position(|&(m, _)| m == mv).unwrap();
+            replies.swap_remove(idx).1
         }).unwrap_or(MCTree::new(0))
-    }
-    // this can panic; only do it for legal moves
-    fn get_mut(self: &mut MCTree, mv: &usize) -> Option<&mut MCTree> {
-        let replies = self.replies.as_mut().unwrap();
-        replies.get_mut(mv)
     }
 }
 
@@ -58,7 +53,7 @@ fn print_mc<G: Game>(mc: &MCTree) {
     let lnt = (mc.plays as f64).ln();
     let explore = 2.0;
     if let Some(ref rs) = mc.replies {
-        for (i, r) in rs.iter() {
+        for &(i, ref r) in rs.iter() {
             G::print_move(i);
             println!(" => {:.5} / {:.5} / {}", r.wins / r.plays as f64, mc_score(r, lnt, explore), r.plays)
         }
@@ -69,24 +64,24 @@ fn print_mc<G: Game>(mc: &MCTree) {
 fn mc_expand<G: Game>(mc: &mut MCTree, g: &G) {
     if mc.replies.is_none() {
         mc.replies = Some({
-            let mut reps = VecMap::new();
+            let mut reps = Vec::new();
             let mvs = g.legal_moves();
             for Weighted { item, weight } in mvs {
-                reps.insert(item, MCTree::new(weight));
+                reps.push((item, MCTree::new(weight)));
             }
             reps
         })
     }
 }
 
-fn mc_move<T: Rng>(rng: &mut T, mc: &MCTree, explore: f64) -> usize {
+fn mc_move<'a, T: Rng>(rng: &mut T, mc: &'a mut MCTree, explore: f64) -> (usize, &'a mut MCTree) {
     let lnt = (mc.plays as f64).ln();
-    debug_assert_eq!(mc.plays, mc.replies.as_ref().unwrap().iter().fold(0, |acc, (_, r)| acc + r.plays) + 1);
+    debug_assert_eq!(mc.plays, mc.replies.as_ref().unwrap().iter().fold(0, |acc, &(_, ref r)| acc + r.plays) + 1);
     let mut best_score = std::f64::NEG_INFINITY;
     let mut best_urgency = 0;
     let mut best = None;
     let mut count = 0;
-    for (p, rep) in mc.replies.as_ref().unwrap().iter() {
+    for (p, &(_, ref rep)) in mc.replies.as_ref().unwrap().iter().enumerate() {
         let score = mc_score(rep, lnt, explore);
         let urgency = rep.urgency;
         if score > best_score || (score == best_score && urgency > best_urgency) {
@@ -101,7 +96,8 @@ fn mc_move<T: Rng>(rng: &mut T, mc: &MCTree, explore: f64) -> usize {
             }
         }
     }
-    best.unwrap() // TODO what if no legal moves?
+    let x = &mut mc.replies.as_mut().unwrap()[best.unwrap()];
+    (x.0, &mut x.1)
 }
 
 fn random_move<R: Rng, G: Game>(rng: &mut R, g: &G) -> usize {
@@ -132,9 +128,9 @@ fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree) -> f64
             play_out(rng, g)
         } else {
             mc_expand(mc, g);
-            let mv = mc_move(rng, mc, 2.0);
+            let (mv, rep) = mc_move(rng, mc, 2.0);
             g.play(mv);
-            mc_iteration(rng, g, mc.get_mut(&mv).unwrap())
+            mc_iteration(rng, g, rep)
         }
     };
     mc.wins += p;
@@ -163,7 +159,7 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>, dones: Sender<bool>) 
             }
             Ok(Cmd::Gen) => {
                 let mv = if mc.replies.is_some() {
-                    mc_move(&mut rng, &mc, 0.0)
+                    mc_move(&mut rng, &mut mc, 0.0).0
                 } else {
                     random_move(&mut rng, &g)
                 };
