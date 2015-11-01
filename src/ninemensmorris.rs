@@ -6,8 +6,7 @@ use rand::distributions::Weighted;
 #[derive(Debug, Clone)]
 pub struct NineMensMorris {
     board: [Space; 24],
-    turn: usize,
-    history: History
+    turn: usize
 }
 
 static MILLS_BY_SPACE : [[[usize; 2]; 2]; 24] = [
@@ -96,7 +95,7 @@ impl NineMensMorris {
 
 impl Game for NineMensMorris {
     fn init() -> NineMensMorris {
-        NineMensMorris { board: [None; 24], turn: 0, history: History::new() }
+        NineMensMorris { board: [None; 24], turn: 0 }
     }
     fn payoff(&self) -> Option<f64> {
         if self.turn < 18 {
@@ -119,7 +118,6 @@ impl Game for NineMensMorris {
             if yours <= 2 { Some(1.0) }
             else if mine <= 2 { Some(0.0) }
             else if mine > 3 && no_adjacent_moves() { Some(0.0) }
-            else if self.history.contains(self.board.iter()) { Some(0.5) }
             else { None }
         }
     }
@@ -160,7 +158,6 @@ impl Game for NineMensMorris {
             }
             self.board[d] = Some(self.current_player());
         } else {
-            self.history.insert(self.board.iter().cloned());
             let s = act % 24;
             let rd = act / 24;
             let d = rd % 24;
