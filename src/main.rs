@@ -156,7 +156,6 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>, dones: Sender<bool>) 
             Ok(Cmd::Move(mv)) => {
                 mc = mc.next(mv);
                 g.play(mv);
-                g.print();
                 let done = g.payoff().is_some();
                 dones.send(done).unwrap();
                 if done { return }
@@ -169,6 +168,7 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>, dones: Sender<bool>) 
                 };
                 mc = mc.next(mv);
                 g.play(mv);
+                g.print();
                 let done = g.payoff().is_some();
                 mvs.send(mv).unwrap();
                 dones.send(done).unwrap();
