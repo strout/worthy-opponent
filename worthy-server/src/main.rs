@@ -32,6 +32,11 @@ fn relay<R: BufRead, W: Write>(r: R, w: &mut W, prefix: &str) {
             w.write(line[1..].as_bytes()).unwrap();
             w.write(b"\ngen\n").unwrap();
             w.flush().unwrap();
+        } else if line.starts_with(";") {
+            match &line[1..] {
+                "bye" => return,
+                x => panic!("Unknown command: {}", x)
+            }
         } else {
             println!("{}: {}", prefix, line);
         }

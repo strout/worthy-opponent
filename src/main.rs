@@ -217,4 +217,5 @@ fn main() {
         "g" => run::<go::GoState>(think_time),
         x => panic!("I don't know how to play '{}'.", x)
     }
+    println!(";bye");
 }
