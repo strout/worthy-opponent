@@ -28,15 +28,16 @@ use game::Game;
 struct MCTree {
     wins: f64,
     plays: usize,
+    bias: f64,
     replies: Option<VecMap<MCTree>>
 }
 
 impl MCTree {
-    fn new() -> MCTree { MCTree { wins: 0.0, plays: 0, replies: None } }
+    fn new(bias: f64) -> MCTree { MCTree { wins: 0.0, plays: 0, replies: None, bias: bias } }
     fn next(self: MCTree, mv: usize) -> MCTree {
         self.replies.and_then(|mut replies| {
             replies.remove(&mv)
-        }).unwrap_or(MCTree::new())
+        }).unwrap_or(MCTree::new(0.5))
     }
     // this can panic; only do it for legal moves
     fn get_mut(self: &mut MCTree, mv: &usize) -> Option<&mut MCTree> {
@@ -46,10 +47,10 @@ impl MCTree {
 }
 
 fn mc_score(mc: &MCTree, lnt: f64, explore: f64) -> f64 {
-    let default = std::f64::INFINITY;
+    let default = 1.0e9;
     match *mc {
-        MCTree { plays: 0, .. } => default,
-        MCTree { wins, plays, .. } => wins / plays as f64 + explore * (lnt / (plays as f64)).sqrt()
+        MCTree { plays: 0, bias, .. } => default + bias,
+        MCTree { wins, plays, bias, .. } => wins / plays as f64 + explore * (lnt / (plays as f64)).sqrt() + bias / plays as f64
     }
 }
 
@@ -69,8 +70,11 @@ fn mc_expand<G: Game>(mc: &mut MCTree, g: &G) {
     if mc.replies.is_none() {
         mc.replies = Some({
             let mut reps = VecMap::new();
-            for Weighted { item: m, .. } in g.legal_moves() {
-                reps.insert(m, MCTree::new());
+            let mvs = g.legal_moves();
+            let mut max_weight = 0;
+            for &Weighted { weight, .. } in mvs.iter() { if weight > max_weight { max_weight = weight } }
+            for Weighted { item, weight } in mvs {
+                reps.insert(item, MCTree::new(weight as f64 / max_weight as f64));
             }
             reps
         })
@@ -143,7 +147,7 @@ enum Cmd { Move(usize), Gen }
 fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>) {
     let mut rng = rand::weak_rng();
     let mut g = G::init();
-    let mut mc = MCTree::new();
+    let mut mc = MCTree::new(0.5);
     let mut g2 = g.clone();
     loop {
         match cmds.try_recv() {
