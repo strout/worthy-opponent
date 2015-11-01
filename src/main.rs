@@ -150,7 +150,6 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>) {
             Err(TryRecvError::Empty) => {},
             Err(TryRecvError::Disconnected) => return,
             Ok(Cmd::Move(mv)) => {
-                print_mc::<G>(&mc);
                 mc = mc.next(mv);
                 g.play(mv);
                 g.print();
