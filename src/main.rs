@@ -28,16 +28,16 @@ use game::Game;
 struct MCTree {
     wins: f64,
     plays: usize,
-    bias: f64,
+    urgency: u32,
     replies: Option<VecMap<MCTree>>
 }
 
 impl MCTree {
-    fn new(bias: f64) -> MCTree { MCTree { wins: 0.0, plays: 0, replies: None, bias: bias } }
+    fn new(urgency: u32) -> MCTree { MCTree { wins: 0.0, plays: 0, replies: None, urgency: urgency } }
     fn next(self: MCTree, mv: usize) -> MCTree {
         self.replies.and_then(|mut replies| {
             replies.remove(&mv)
-        }).unwrap_or(MCTree::new(0.5))
+        }).unwrap_or(MCTree::new(0))
     }
     // this can panic; only do it for legal moves
     fn get_mut(self: &mut MCTree, mv: &usize) -> Option<&mut MCTree> {
@@ -47,10 +47,10 @@ impl MCTree {
 }
 
 fn mc_score(mc: &MCTree, lnt: f64, explore: f64) -> f64 {
-    let default = 1.0e9;
+    let default = std::f64::INFINITY;
     match *mc {
-        MCTree { plays: 0, bias, .. } => default + bias,
-        MCTree { wins, plays, bias, .. } => wins / plays as f64 + explore * (lnt / (plays as f64)).sqrt() + bias / plays as f64
+        MCTree { plays: 0, urgency, .. } => default,
+        MCTree { wins, plays, urgency, .. } => wins / plays as f64 + explore * (lnt / (plays as f64)).sqrt()
     }
 }
 
@@ -71,10 +71,8 @@ fn mc_expand<G: Game>(mc: &mut MCTree, g: &G) {
         mc.replies = Some({
             let mut reps = VecMap::new();
             let mvs = g.legal_moves();
-            let mut max_weight = 0;
-            for &Weighted { weight, .. } in mvs.iter() { if weight > max_weight { max_weight = weight } }
             for Weighted { item, weight } in mvs {
-                reps.insert(item, MCTree::new(weight as f64 / max_weight as f64));
+                reps.insert(item, MCTree::new(weight));
             }
             reps
         })
@@ -85,13 +83,16 @@ fn mc_move<T: Rng>(rng: &mut T, mc: &MCTree, explore: f64) -> usize {
     let lnt = (mc.plays as f64).ln();
     debug_assert_eq!(mc.plays, mc.replies.as_ref().unwrap().iter().fold(0, |acc, (_, r)| acc + r.plays) + 1);
     let mut best_score = std::f64::NEG_INFINITY;
+    let mut best_urgency = 0;
     let mut best = None;
     let mut count = 0;
     for (p, rep) in mc.replies.as_ref().unwrap().iter() {
         let score = mc_score(rep, lnt, explore);
-        if score > best_score {
+        let urgency = rep.urgency;
+        if score > best_score || (score == best_score && urgency > best_urgency) {
             best = Some(p);
             best_score = score;
+            best_urgency = urgency;
             count = 1;
         } else if score == best_score {
             count += 1;
@@ -147,7 +148,7 @@ enum Cmd { Move(usize), Gen }
 fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>, dones: Sender<bool>) {
     let mut rng = rand::weak_rng();
     let mut g = G::init();
-    let mut mc = MCTree::new(0.5);
+    let mut mc = MCTree::new(0);
     let mut g2 = g.clone();
     loop {
         match cmds.try_recv() {
