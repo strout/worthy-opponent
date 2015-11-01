@@ -1,5 +1,6 @@
 use std::net::TcpListener;
 use std::io::{BufReader, BufRead, Write};
+use std::thread::spawn;
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:64335").unwrap();
@@ -9,25 +10,22 @@ fn main() {
     let mut player1 = connections.next().unwrap().unwrap();
     let mut player2 = connections.next().unwrap().unwrap();
 
-    let mut p1_in = BufReader::new(player1.try_clone().unwrap());
-    let mut p2_in = BufReader::new(player2.try_clone().unwrap());
+    let p1_in = BufReader::new(player1.try_clone().unwrap());
+    let p2_in = BufReader::new(player2.try_clone().unwrap());
 
     player1.write(b"gen\n").unwrap();
     player1.flush().unwrap();
 
-    loop {
-        let mut buf = String::new();
-        p1_in.read_line(&mut buf).unwrap();
-        if buf.starts_with("!") {
-            let mv = &buf[1..];
-            player2.write(mv.as_bytes()).unwrap();
-            player2.write(b"gen\n").unwrap();
-            player2.flush().unwrap();
-            std::mem::swap(&mut p1_in, &mut p2_in);
-            std::mem::swap(&mut player1, &mut player2);
-        }
-        print!("{}", buf);
-    }
+    spawn(move || relay(p1_in, &mut player2));
+    relay(p2_in, &mut player1);
+}
 
-    println!("Hello, world!");
+fn relay<R: BufRead, W: Write>(r: R, w: &mut W) {
+    for line in r.lines().flat_map(|x| x) {
+        if line.starts_with("!") {
+            w.write(line[1..].as_bytes()).unwrap();
+            w.write(b"\ngen\n").unwrap();
+            w.flush().unwrap();
+        }
+    }
 }
