@@ -1,0 +1,4 @@
+[package]
+name = "worthy-server"
+version = "0.1.0"
+authors = ["Steve Trout <steve.trout@gmail.com>"]
