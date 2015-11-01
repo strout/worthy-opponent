@@ -15,6 +15,7 @@ use vec_map::VecMap;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 use rand::Rng;
+use rand::distributions::{Weighted, WeightedChoice, IndependentSample};
 use std::io;
 
 mod game;
@@ -70,7 +71,7 @@ fn mc_expand<G: Game>(mc: &mut MCTree, g: &G) {
     if mc.replies.is_none() {
         mc.replies = Some({
             let mut reps = VecMap::new();
-            for m in g.legal_moves() {
+            for Weighted { item: m, .. } in g.legal_moves() {
                 reps.insert(m, MCTree::new());
             }
             reps
@@ -100,12 +101,18 @@ fn mc_move<T: Rng>(rng: &mut T, mc: &MCTree, explore: f64) -> usize {
     best.unwrap() // TODO what if no legal moves?
 }
 
+fn random_move<R: Rng, G: Game>(rng: &mut R, g: &G) -> usize {
+    let mut moves = g.playout_moves();
+    let dist = WeightedChoice::new(&mut moves[..]);
+    dist.ind_sample(rng)
+}
+
 fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
     debug_assert!(g.payoff().is_none());
     let mut flip = false;
     loop
     {
-        let mv = *rng.choose(&g.legal_moves()[..]).expect("Either 'payoff' or 'legal_moves' is lying.");
+        let mv = random_move(rng, g);
         g.play(mv);
         flip = !flip;
         match g.payoff() {
@@ -152,10 +159,10 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>) {
                 if g.payoff().is_some() { return }
             }
             Ok(Cmd::Gen) => {
-                if mc.plays > 0 {
+                if mc.replies.is_some() {
                     mvs.send(mc_move(&mut rng, &mc, 0.0)).unwrap()
                 } else {
-                    mvs.send(*rng.choose(&g.legal_moves()[..]).expect("Last-ditch effort to pick a move failed.")).unwrap();
+                    mvs.send(random_move(&mut rng, &g)).unwrap();
                 }
             }
         }

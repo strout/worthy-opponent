@@ -3,6 +3,7 @@ const SIZE : usize = 9;
 use bit_set::BitSet;
 use game::Game;
 use basics::*;
+use rand::distributions::Weighted;
 
 #[derive(Debug)]
 struct BoardOf<T> {
@@ -88,6 +89,22 @@ fn capture(c: Color, p: Pos, b: &Board) -> BitSet {
     }
 }
 
+fn legal(c: Color, p: Pos, board: &Board, h: &History) -> bool {
+    if board.dat[p].is_some() { return false }
+    let mut board = board.clone();
+    board.dat[p] = Some(c);
+    let oc = c.enemy();
+    let mut captured = BitSet::with_capacity(SIZE * SIZE);
+    for &p in neighbors(p).into_iter().flat_map(|x| x) {
+        captured.union_with(&capture(oc, p, &board))
+    }
+    for p in captured.iter() { board.dat[p] = None; }
+    let self_captured = capture(c, p, &board);
+    for p in self_captured.iter() { board.dat[p] = None; }
+    let bad = h.contains(board.dat.iter());
+    !bad
+}
+
 fn play(c: Color, p: Pos, board: &mut Board, h: &mut History) -> bool {
     if board.dat[p].is_some() { return false }
     board.dat[p] = Some(c);
@@ -106,6 +123,24 @@ fn play(c: Color, p: Pos, board: &mut Board, h: &mut History) -> bool {
         board.dat[p] = None;
     }
     ok
+}
+
+fn weigh_move(g: &GoState, p: Pos) -> u32 {
+    if neighbors(p).into_iter().filter_map(|&x| x).any(|p| {
+        let x = g.0.dat[p];
+        match x {
+            None => false,
+            Some(c) => neighbors(p).into_iter().filter_map(|&x| x).all(|p| g.0.dat[p] == Some(c.enemy()))
+        }
+    }) {
+        if legal(g.2, p, &g.0, &g.1) {
+            10
+        } else {
+            0
+        }
+    } else {
+        1
+    }
 }
 
 const UPPER_LETTERS : &'static str = "ABCDEFGHJKLMNOPQRSTUVWXYZ";
@@ -164,10 +199,16 @@ impl Game for GoState {
             else { Some(1.0) }
         } else { None }
     }
-    fn legal_moves(&self) -> Vec<usize> {
+    fn legal_moves(&self) -> Vec<Weighted<usize>> {
         let max = SIZE * SIZE;
-        let mut moves = self.0.dat.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(i) } else { None }).collect::<Vec<_>>();
-        moves.push(max);
+        let mut moves = (0..max).filter_map(|i| if legal(self.2, i, &self.0, &self.1) { Some(Weighted { weight: 1, item: i }) } else { None }).collect::<Vec<_>>();
+        moves.push(Weighted { weight: 1, item: max });
+        moves
+    }
+    fn playout_moves(&self) -> Vec<Weighted<usize>> {
+        let max = SIZE * SIZE;
+        let mut moves = self.0.dat.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(Weighted { weight: weigh_move(&self, i), item: i }) } else { None }).collect::<Vec<_>>();
+        moves.push(Weighted { weight: 1, item: max });
         moves
     }
     fn play(&mut self, act: usize) {

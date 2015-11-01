@@ -1,6 +1,7 @@
 use game::Game;
 use basics::*;
 use bit_set::BitSet;
+use rand::distributions::Weighted;
 
 #[derive(Debug, Clone)]
 pub struct NineMensMorris {
@@ -122,16 +123,16 @@ impl Game for NineMensMorris {
             else { None }
         }
     }
-    fn legal_moves(&self) -> Vec<usize> {
+    fn legal_moves(&self) -> Vec<Weighted<usize>> {
         let mut ret = vec![];
         if self.turn < 18 {
            for d in self.board.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(i) } else { None }) {
                if self.forms_mill(d) {
                    for r in self.removable_pieces().iter() {
-                       ret.push(d + 24 * r);
+                       ret.push(Weighted { weight: 2, item: d + 24 * r });
                    }
                } else {
-                   ret.push(d);
+                   ret.push(Weighted { weight: 1, item: d });
                }
            }
         } else {
@@ -140,10 +141,10 @@ impl Game for NineMensMorris {
                for d in if self.board.iter().filter(|&&x| x == c).count() == 3 { self.board.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(i) } else { None }).collect() } else { self.adjacent_free(s) }.into_iter() {
                    if self.forms_mill_without(d, s) {
                        for r in self.removable_pieces().iter() {
-                           ret.push(s + 24 * d + 24 * 24 * r);
+                           ret.push(Weighted { weight: 2, item: s + 24 * d + 24 * 24 * r});
                        }
                    } else {
-                       ret.push(s + 24 * d);
+                       ret.push(Weighted { weight: 1, item: s + 24 * d });
                    }
                }
            }
