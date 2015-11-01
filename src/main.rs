@@ -22,25 +22,24 @@ mod ninemensmorris;
 
 use game::Game;
 
-#[derive(Debug)]
-struct MCTree {
+struct MCTree<M> {
     wins: f64,
     plays: usize,
     urgency: u32,
-    replies: Option<Vec<(usize, MCTree)>>
+    replies: Option<Vec<(M, MCTree<M>)>>
 }
 
-impl MCTree {
-    fn new(urgency: u32) -> MCTree { MCTree { wins: 0.0, plays: 0, replies: None, urgency: urgency } }
-    fn next(self: MCTree, mv: usize) -> MCTree {
+impl<M: PartialEq> MCTree<M> {
+    fn new(urgency: u32) -> MCTree<M> { MCTree { wins: 0.0, plays: 0, replies: None, urgency: urgency } }
+    fn next(self: MCTree<M>, mv: &M) -> MCTree<M> {
         self.replies.map(|mut replies| {
-            let idx = replies.iter().position(|&(m, _)| m == mv).unwrap();
+            let idx = replies.iter().position(|&(ref m, _)| m == mv).unwrap();
             replies.swap_remove(idx).1
         }).unwrap_or(MCTree::new(0))
     }
 }
 
-fn mc_score(mc: &MCTree, lnt: f64, explore: f64) -> f64 {
+fn mc_score<M>(mc: &MCTree<M>, lnt: f64, explore: f64) -> f64 {
     let default = std::f64::INFINITY;
     match *mc {
         MCTree { plays: 0, urgency, .. } => default,
@@ -48,7 +47,7 @@ fn mc_score(mc: &MCTree, lnt: f64, explore: f64) -> f64 {
     }
 }
 
-fn print_mc<G: Game>(mc: &MCTree) {
+fn print_mc<G: Game>(mc: &MCTree<usize>) {
     let lnt = (mc.plays as f64).ln();
     let explore = 2.0;
     if let Some(ref rs) = mc.replies {
@@ -60,7 +59,7 @@ fn print_mc<G: Game>(mc: &MCTree) {
     println!("");
 }
 
-fn mc_expand<G: Game>(mc: &mut MCTree, g: &G) {
+fn mc_expand<G: Game>(mc: &mut MCTree<usize>, g: &G) {
     if mc.replies.is_none() {
         mc.replies = Some({
             let mut reps = Vec::new();
@@ -73,7 +72,7 @@ fn mc_expand<G: Game>(mc: &mut MCTree, g: &G) {
     }
 }
 
-fn mc_move<'a, T: Rng>(rng: &mut T, mc: &'a mut MCTree, explore: f64) -> (usize, &'a mut MCTree) {
+fn mc_move<'a, M, T: Rng>(rng: &mut T, mc: &'a mut MCTree<M>, explore: f64) -> (&'a M, &'a mut MCTree<M>) {
     let lnt = (mc.plays as f64).ln();
     debug_assert_eq!(mc.plays, mc.replies.as_ref().unwrap().iter().fold(0, |acc, &(_, ref r)| acc + r.plays) + 1);
     let mut best_score = std::f64::NEG_INFINITY;
@@ -96,7 +95,7 @@ fn mc_move<'a, T: Rng>(rng: &mut T, mc: &'a mut MCTree, explore: f64) -> (usize,
         }
     }
     let x = &mut mc.replies.as_mut().unwrap()[best.unwrap()];
-    (x.0, &mut x.1)
+    (&x.0, &mut x.1)
 }
 
 fn random_move<R: Rng, G: Game>(rng: &mut R, g: &G) -> usize {
@@ -120,14 +119,14 @@ fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
     }
 }
 
-fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree) -> f64 {
+fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree<usize>) -> f64 {
     let p = 1.0 - match g.payoff() {
         Some(p) => p,
         None => if mc.plays == 0 {
             play_out(rng, g)
         } else {
             mc_expand(mc, g);
-            let (mv, rep) = mc_move(rng, mc, 2.0);
+            let (&mv, rep) = mc_move(rng, mc, 2.0);
             g.play(mv);
             mc_iteration(rng, g, rep)
         }
@@ -150,7 +149,7 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>, dones: Sender<bool>) 
             Err(TryRecvError::Empty) => {},
             Err(TryRecvError::Disconnected) => return,
             Ok(Cmd::Move(mv)) => {
-                mc = mc.next(mv);
+                mc = mc.next(&mv);
                 g.play(mv);
                 let done = g.payoff().is_some();
                 dones.send(done).unwrap();
@@ -158,11 +157,11 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>, dones: Sender<bool>) 
             }
             Ok(Cmd::Gen) => {
                 let mv = if mc.replies.is_some() {
-                    mc_move(&mut rng, &mut mc, 0.0).0
+                    *mc_move(&mut rng, &mut mc, 0.0).0
                 } else {
                     random_move(&mut rng, &g)
                 };
-                mc = mc.next(mv);
+                mc = mc.next(&mv);
                 g.play(mv);
                 g.print();
                 let done = g.payoff().is_some();
