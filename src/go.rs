@@ -89,6 +89,22 @@ fn capture(c: Color, p: Pos, b: &Board) -> BitSet {
     }
 }
 
+fn legal(c: Color, p: Pos, board: &Board, h: &History) -> bool {
+    if board.dat[p].is_some() { return false }
+    let mut board = board.clone();
+    board.dat[p] = Some(c);
+    let oc = c.enemy();
+    let mut captured = BitSet::with_capacity(SIZE * SIZE);
+    for &p in neighbors(p).into_iter().flat_map(|x| x) {
+        captured.union_with(&capture(oc, p, &board))
+    }
+    for p in captured.iter() { board.dat[p] = None; }
+    let self_captured = capture(c, p, &board);
+    for p in self_captured.iter() { board.dat[p] = None; }
+    let bad = h.contains(board.dat.iter());
+    !bad
+}
+
 fn play(c: Color, p: Pos, board: &mut Board, h: &mut History) -> bool {
     if board.dat[p].is_some() { return false }
     board.dat[p] = Some(c);
@@ -111,7 +127,7 @@ fn play(c: Color, p: Pos, board: &mut Board, h: &mut History) -> bool {
 
 fn weigh_move(c: Color, p: Pos, board: &Board) -> u32 {
     let oc = Some(c.enemy());
-    if !neighbors(p).into_iter().all(|&mp| match mp {
+    if neighbors(p).into_iter().all(|&mp| match mp {
         None => true,
         Some(p) => board.dat[p] == oc
     }) {
@@ -178,6 +194,12 @@ impl Game for GoState {
         } else { None }
     }
     fn legal_moves(&self) -> Vec<Weighted<usize>> {
+        let max = SIZE * SIZE;
+        let mut moves = (0..max).filter_map(|i| if legal(self.2, i, &self.0, &self.1) { Some(Weighted { weight: weigh_move(self.2, i, &self.0), item: i }) } else { None }).collect::<Vec<_>>();
+        moves.push(Weighted { weight: 1, item: max });
+        moves
+    }
+    fn playout_moves(&self) -> Vec<Weighted<usize>> {
         let max = SIZE * SIZE;
         let mut moves = self.0.dat.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(Weighted { weight: weigh_move(self.2, i, &self.0), item: i }) } else { None }).collect::<Vec<_>>();
         moves.push(Weighted { weight: 1, item: max });

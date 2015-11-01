@@ -102,7 +102,7 @@ fn mc_move<T: Rng>(rng: &mut T, mc: &MCTree, explore: f64) -> usize {
 }
 
 fn random_move<R: Rng, G: Game>(rng: &mut R, g: &G) -> usize {
-    let mut moves = g.legal_moves();
+    let mut moves = g.playout_moves();
     let dist = WeightedChoice::new(&mut moves[..]);
     dist.ind_sample(rng)
 }
