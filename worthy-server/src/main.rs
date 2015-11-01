@@ -1,6 +1,10 @@
+extern crate rand;
+
 use std::net::TcpListener;
 use std::io::{BufReader, BufRead, Write};
 use std::thread::spawn;
+use std::mem::swap;
+use rand::random;
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:64335").unwrap();
@@ -9,6 +13,8 @@ fn main() {
 
     let mut player1 = connections.next().unwrap().unwrap();
     let mut player2 = connections.next().unwrap().unwrap();
+
+    if random() { swap(&mut player1, &mut player2) }
 
     let p1_in = BufReader::new(player1.try_clone().unwrap());
     let p2_in = BufReader::new(player2.try_clone().unwrap());
