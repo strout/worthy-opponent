@@ -1,7 +1,5 @@
 #![cfg_attr(test, feature(test))]
 
-const THINK_TIME: u32 = 1000;
-
 extern crate rand;
 extern crate bit_set;
 extern crate vec_map;
@@ -178,7 +176,7 @@ fn parse_command<G: Game>(string: &str) -> Cmd {
     }
 }
 
-fn run<G: Game>() {
+fn run<G: Game>(think_time: u32) {
     let (sendcmd, recvcmd) = channel();
     let (sendmv, recvmv) = channel();
     thread::spawn(move || think::<G>(recvcmd, sendmv));
@@ -186,7 +184,7 @@ fn run<G: Game>() {
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
         let cmd = parse_command::<G>(&input);
-        if cmd == Cmd::Gen { thread::sleep_ms(THINK_TIME) }
+        if cmd == Cmd::Gen { thread::sleep_ms(think_time) }
         match sendcmd.send(cmd) {
             Err(_) => return,
             _ => {}
@@ -209,10 +207,11 @@ fn run<G: Game>() {
 
 fn main() {
     let game = std::env::args().nth(1).expect("Please supply a game (t = Tic-Tac-Toe, n = Nine Men's Morris, g = Go)");
+    let think_time = std::env::args().nth(2).and_then(|tt| tt.parse().ok()).expect("Please supply a thinking time (in milliseconds)");
     match game.as_ref() {
-        "t" => run::<tictactoe::TicTacToe>(),
-        "n" => run::<ninemensmorris::NineMensMorris>(),
-        "g" => run::<go::GoState>(),
+        "t" => run::<tictactoe::TicTacToe>(think_time),
+        "n" => run::<ninemensmorris::NineMensMorris>(think_time),
+        "g" => run::<go::GoState>(think_time),
         x => panic!("I don't know how to play '{}'.", x)
     }
 }
