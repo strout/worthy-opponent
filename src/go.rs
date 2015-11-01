@@ -125,7 +125,7 @@ fn play(c: Color, p: Pos, board: &mut Board, h: &mut History) -> bool {
     ok
 }
 
-fn weigh_move(g: &GoState, p: Pos) -> u32 {
+fn weigh_move(g: &GoState, p: Pos, check: bool) -> u32 {
     if neighbors(p).into_iter().filter_map(|&x| x).any(|p| {
         let x = g.0.dat[p];
         match x {
@@ -133,7 +133,7 @@ fn weigh_move(g: &GoState, p: Pos) -> u32 {
             Some(c) => neighbors(p).into_iter().filter_map(|&x| x).all(|p| g.0.dat[p] == Some(c.enemy()))
         }
     }) {
-        if legal(g.2, p, &g.0, &g.1) {
+        if !check || legal(g.2, p, &g.0, &g.1) {
             10
         } else {
             0
@@ -201,13 +201,13 @@ impl Game for GoState {
     }
     fn legal_moves(&self) -> Vec<Weighted<usize>> {
         let max = SIZE * SIZE;
-        let mut moves = (0..max).filter_map(|i| if legal(self.2, i, &self.0, &self.1) { Some(Weighted { weight: 1, item: i }) } else { None }).collect::<Vec<_>>();
+        let mut moves = (0..max).filter_map(|i| if legal(self.2, i, &self.0, &self.1) { Some(Weighted { weight: weigh_move(&self, i, false), item: i }) } else { None }).collect::<Vec<_>>();
         moves.push(Weighted { weight: 1, item: max });
         moves
     }
     fn playout_moves(&self) -> Vec<Weighted<usize>> {
         let max = SIZE * SIZE;
-        let mut moves = self.0.dat.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(Weighted { weight: weigh_move(&self, i), item: i }) } else { None }).collect::<Vec<_>>();
+        let mut moves = self.0.dat.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(Weighted { weight: weigh_move(&self, i, true), item: i }) } else { None }).collect::<Vec<_>>();
         moves.push(Weighted { weight: 1, item: max });
         moves
     }
