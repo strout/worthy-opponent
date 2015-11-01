@@ -130,7 +130,7 @@ fn weigh_move(g: &GoState, p: Pos, check: bool) -> u32 {
         let x = g.0.dat[p];
         match x {
             None => false,
-            Some(c) => neighbors(p).into_iter().filter_map(|&x| x).all(|p| g.0.dat[p] == Some(c.enemy()))
+            Some(c) => neighbors(p).into_iter().filter_map(|&x| x).filter(|&p| g.0.dat[p] != Some(c.enemy())).count() == 1
         }
     }) {
         if !check || legal(g.2, p, &g.0, &g.1) {
