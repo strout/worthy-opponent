@@ -22,7 +22,7 @@ mod ninemensmorris;
 
 use game::Game;
 
-struct MCTree<M> {
+pub struct MCTree<M> {
     wins: f64,
     plays: usize,
     urgency: u32,
@@ -119,7 +119,7 @@ fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
     }
 }
 
-fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree<G::Move>) -> f64 where G::Move : PartialEq {
+pub fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree<G::Move>) -> f64 where G::Move : PartialEq {
     let p = 1.0 - match g.payoff() {
         Some(p) => p,
         None => if mc.plays == 0 {
@@ -214,4 +214,38 @@ fn main() {
         x => panic!("I don't know how to play '{}'.", x)
     }
     println!(";bye");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use game::Game;
+    use test::Bencher;
+    use rand::weak_rng;
+    use go::GoState;
+    use ninemensmorris::NineMensMorris;
+    use tictactoe::TicTacToe;
+
+    fn bench_mc_iteration<G: Game>(bench: &mut Bencher) where G::Move : PartialEq {
+        let mut mc = MCTree::new(0);
+        let mut g = G::init();
+        let mut g2 = g.clone();
+        let mut rng = weak_rng();
+        bench.iter(|| { g2.clone_from(&g); mc_iteration(&mut rng, &mut g2, &mut mc); })
+    }
+
+    #[bench]
+    fn go(bench: &mut Bencher) {
+        bench_mc_iteration::<GoState>(bench)
+    }
+
+    #[bench]
+    fn ninemensmorris(bench: &mut Bencher) {
+        bench_mc_iteration::<NineMensMorris>(bench)
+    }
+
+    #[bench]
+    fn tictactoe(bench: &mut Bencher) {
+        bench_mc_iteration::<TicTacToe>(bench)
+    }
 }
