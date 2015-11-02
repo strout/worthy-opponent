@@ -210,7 +210,7 @@ fn main() {
     match game.as_ref() {
         "t" => run::<tictactoe::TicTacToe>(think_time),
         "n" => run::<ninemensmorris::NineMensMorris>(think_time),
-        "g" => run::<go::GoState>(think_time),
+        "g" => run::<go::Go>(think_time),
         x => panic!("I don't know how to play '{}'.", x)
     }
     println!(";bye");
@@ -222,7 +222,7 @@ mod tests {
     use game::Game;
     use test::Bencher;
     use rand::weak_rng;
-    use go::GoState;
+    use go::Go;
     use ninemensmorris::NineMensMorris;
     use tictactoe::TicTacToe;
 
@@ -236,7 +236,7 @@ mod tests {
 
     #[bench]
     fn go(bench: &mut Bencher) {
-        bench_mc_iteration::<GoState>(bench)
+        bench_mc_iteration::<Go>(bench)
     }
 
     #[bench]
