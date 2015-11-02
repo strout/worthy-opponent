@@ -42,8 +42,8 @@ impl<M: PartialEq> MCTree<M> {
 fn mc_score<M>(mc: &MCTree<M>, lnt: f64, explore: f64) -> f64 {
     let default = std::f64::INFINITY;
     match *mc {
-        MCTree { plays: 0, urgency, .. } => default,
-        MCTree { wins, plays, urgency, .. } => wins / plays as f64 + explore * (lnt / (plays as f64)).sqrt()
+        MCTree { plays: 0, .. } => default,
+        MCTree { wins, plays, .. } => wins / plays as f64 + explore * (lnt / (plays as f64)).sqrt()
     }
 }
 
