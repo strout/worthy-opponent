@@ -137,9 +137,10 @@ impl Game for NineMensMorris {
         if self.turn < 18 {
             None
         } else {
-            let (mine, yours) = if self.current_player() == Black { (self.black_pieces, self.white_pieces) } else { (self.white_pieces, self.black_pieces) };
+            let c = self.current_player();
+            let (mine, yours) = if c == Black { (self.black_pieces, self.white_pieces) } else { (self.white_pieces, self.black_pieces) };
             let no_adjacent_moves = || {
-                let mut ss = self.board.iter().enumerate().filter_map(|(i, &x)| if x == self.current_player() { Some(i) } else { None });
+                let mut ss = self.board.iter().enumerate().filter_map(|(i, &x)| if x == c { Some(i) } else { None });
                 ss.all(|s| ADJACENT_SPACES[s].iter().all(|&x| self.board[x].is_filled()))
             };
             if yours <= 2 { Some(1.0) }
