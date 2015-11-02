@@ -70,23 +70,25 @@ fn score(board: &Board) -> (f32, f32) {
     (b, w + board.komi)
 }
 
-fn capture(c: Space, p: Pos, b: &Board) -> BitSet {
-    let mut captured = BitSet::with_capacity(SIZE * SIZE);
-    let mut stack = vec![p];
-    loop {
-        match stack.pop() {
-            None => return captured,
-                 Some(p) => if !captured.contains(&p) {
-                     match b.dat[p] {
-                         Empty => return BitSet::new(),
-                         c2 => if c == c2 {
-                             captured.insert(p);
-                             stack.extend(neighbors(p).iter().filter_map(Option::clone))
-                         }
-                     }
-                 }
+fn capture_inner(c: Space, p: Pos, b: &Board, captured: &mut BitSet) -> bool {
+    if !captured.contains(&p) {
+        match b.dat[p] {
+            Empty => return false,
+            c2 => if c == c2 {
+                captured.insert(p);
+                for p in neighbors(p).iter().filter_map(Option::clone) {
+                    if !capture_inner(c, p, b, captured) { return false }
+                }
+            }
         }
     }
+    true
+}
+
+fn capture(c: Space, p: Pos, b: &Board) -> BitSet {
+    let mut captured = BitSet::with_capacity(SIZE * SIZE);
+    if !capture_inner(c, p, b, &mut captured) { captured.clear(); }
+    captured
 }
 
 fn legal(c: Space, p: Pos, board: &Board, h: &History) -> bool {
