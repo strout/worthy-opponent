@@ -101,7 +101,7 @@ static ADJACENT_SPACES : [&'static [usize]; 24] = [
 impl NineMensMorris {
     fn current_player(&self) -> Space { if self.turn % 2 == 0 { Black } else { White } }
     fn forms_mill(&self, x: usize) -> bool { self.possible_mills_for(x).len() > 0 }
-    fn forms_mill_without(&self, x: usize, y: usize) -> bool { self.possible_mills_for(x).iter().filter(|m| !m.contains(&y)).count() > 0 }
+    fn forms_mill_without(&self, x: usize, y: usize) -> bool { self.possible_mills_for(x).iter().filter(|m| !m.contains(&y)).next().is_some() }
     fn possible_mills_for(&self, x: usize) -> Vec<&'static [usize; 2]> {
         let c = self.current_player();
         MILLS_BY_SPACE[x].iter().filter(|m| m.iter().all(|&y| c == self.board[y])).collect()
