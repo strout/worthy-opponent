@@ -2,11 +2,44 @@ use game::Game;
 use basics::*;
 use bit_set::BitSet;
 use rand::distributions::Weighted;
+use std::str::FromStr;
+use std::fmt::{self, Display, Formatter};
 
 #[derive(Debug, Clone)]
 pub struct NineMensMorris {
     board: [Space; 24],
     turn: usize
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Move { from: Option<usize>, to: usize, remove: Option<usize> }
+
+impl FromStr for Move {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Move, ()> {
+        let encoded = match s.parse::<usize>() {
+            Ok(x) => x,
+            Err(_) => return Err(())
+        };
+        let (d, s_and_r) = (encoded % 24, encoded / 24);
+        let (maybe_s, maybe_r) = (s_and_r % 25, s_and_r / 25);
+        let s = match maybe_s {
+            0 => None,
+            x => Some(x - 1)
+        };
+        let r = match maybe_r {
+            0 => None,
+            x => Some(x - 1)
+        };
+        Ok(Move{ from: s, to: d, remove: r })
+    }
+}
+
+impl Display for Move {
+    fn fmt(&self, formatter: &mut Formatter) -> Result<(), fmt::Error> {
+        let val = self.to + 24 * (match self.from { None => 0, Some(x) => x + 1 } + 25 * match self.remove { None => 0, Some(x) => x + 1 });
+        val.fmt(formatter)
+    }
 }
 
 static MILLS_BY_SPACE : [[[usize; 2]; 2]; 24] = [
@@ -94,7 +127,7 @@ impl NineMensMorris {
 }
 
 impl Game for NineMensMorris {
-    type Move = usize;
+    type Move = Move;
     fn init() -> NineMensMorris {
         NineMensMorris { board: [None; 24], turn: 0 }
     }
@@ -122,16 +155,16 @@ impl Game for NineMensMorris {
             else { None }
         }
     }
-    fn legal_moves(&self) -> Vec<Weighted<usize>> {
+    fn legal_moves(&self) -> Vec<Weighted<Move>> {
         let mut ret = vec![];
         if self.turn < 18 {
            for d in self.board.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(i) } else { None }) {
                if self.forms_mill(d) {
                    for r in self.removable_pieces().iter() {
-                       ret.push(Weighted { weight: 2, item: d + 24 * r });
+                       ret.push(Weighted { weight: 2, item: Move { from: None, to: d, remove: Some(r) } });
                    }
                } else {
-                   ret.push(Weighted { weight: 1, item: d });
+                   ret.push(Weighted { weight: 1, item: Move { from: None, to: d, remove: None } });
                }
            }
         } else {
@@ -140,35 +173,20 @@ impl Game for NineMensMorris {
                for d in if self.board.iter().filter(|&&x| x == c).count() == 3 { self.board.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(i) } else { None }).collect() } else { self.adjacent_free(s) }.into_iter() {
                    if self.forms_mill_without(d, s) {
                        for r in self.removable_pieces().iter() {
-                           ret.push(Weighted { weight: 2, item: s + 24 * d + 24 * 24 * r});
+                           ret.push(Weighted { weight: 2, item: Move { from: Some(s), to: d, remove: Some(r) } });
                        }
                    } else {
-                       ret.push(Weighted { weight: 1, item: s + 24 * d });
+                       ret.push(Weighted { weight: 1, item: Move { from: Some(s), to: d, remove: None } });
                    }
                }
            }
         }
         ret
     }
-    fn play(&mut self, act: &usize) {
-        if self.turn < 18 {
-            let d = act % 24;
-            let r = act / 24;
-            if self.forms_mill(d) {
-                self.board[r] = None;
-            }
-            self.board[d] = Some(self.current_player());
-        } else {
-            let s = act % 24;
-            let rd = act / 24;
-            let d = rd % 24;
-            let r = rd / 24;
-            if self.forms_mill(d) {
-                self.board[r] = None;
-            }
-            self.board[d] = Some(self.current_player());
-            self.board[s] = None;
-        }
+    fn play(&mut self, &Move { from, to, remove }: &Move) {
+        self.board[to] = Some(self.current_player());
+        if let Some(x) = from { self.board[x] = None; }
+        if let Some(x) = remove { self.board[x] = None; }
         self.turn += 1;
     }
     fn print(&self) {
@@ -185,6 +203,6 @@ impl Game for NineMensMorris {
         println!("|         |");
         println!("{}----{}----{}", disp(self.board[21]), disp(self.board[22]), disp(self.board[23]));
     }
-    fn parse_move(string: &str) -> usize { string.parse().unwrap() }
-    fn print_move(mv: &usize) { print!("{}", mv) }
+    fn parse_move(string: &str) -> Move { string.parse().unwrap() }
+    fn print_move(mv: &Move) { print!("{}", mv) }
 }
