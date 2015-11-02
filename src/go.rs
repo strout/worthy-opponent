@@ -128,7 +128,7 @@ fn play(c: Space, p: Pos, board: &mut Board, h: &mut History) -> bool {
 }
 
 fn weigh_move(g: &GoState, p: Pos, check: bool) -> u32 {
-    if neighbors(p).into_iter().filter_map(|&x| x).any(|p| {
+    if neighbors(p).into_iter().flat_map(|x| x).any(|&p| {
         let x = g.0.dat[p];
         match x {
             Empty => false,
