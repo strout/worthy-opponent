@@ -94,6 +94,7 @@ impl NineMensMorris {
 }
 
 impl Game for NineMensMorris {
+    type Move = usize;
     fn init() -> NineMensMorris {
         NineMensMorris { board: [None; 24], turn: 0 }
     }
@@ -149,7 +150,7 @@ impl Game for NineMensMorris {
         }
         ret
     }
-    fn play(&mut self, act: usize) {
+    fn play(&mut self, act: &usize) {
         if self.turn < 18 {
             let d = act % 24;
             let r = act / 24;
@@ -184,4 +185,6 @@ impl Game for NineMensMorris {
         println!("|         |");
         println!("{}----{}----{}", disp(self.board[21]), disp(self.board[22]), disp(self.board[23]));
     }
+    fn parse_move(string: &str) -> usize { string.parse().unwrap() }
+    fn print_move(mv: &usize) { print!("{}", mv) }
 }

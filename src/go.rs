@@ -186,6 +186,7 @@ fn make_board(komi: f32) -> Board {
 pub type GoState = (Board, History, Color, usize, bool);
 
 impl Game for GoState {
+    type Move = usize;
     fn init() -> GoState {
         (make_board(0.0), History::new(), Black, 0, false)
     }
@@ -211,7 +212,7 @@ impl Game for GoState {
         moves.push(Weighted { weight: 1, item: max });
         moves
     }
-    fn play(&mut self, act: usize) {
+    fn play(&mut self, &act: &usize) {
         if act >= SIZE * SIZE {
             self.3 += 1
         } else {
@@ -226,5 +227,5 @@ impl Game for GoState {
     fn parse_move(string: &str) -> usize {
         parse_pos(string).expect("Bad move.")
     }
-    fn print_move(mv: usize) { print_pos(mv) }
+    fn print_move(&mv: &usize) { print_pos(mv) }
 }

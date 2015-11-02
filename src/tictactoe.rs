@@ -41,6 +41,7 @@ impl TicTacToe {
 }
 
 impl Game for TicTacToe {
+    type Move = usize;
     fn init() -> TicTacToe {
        TicTacToe { board: [None; 9], current: Black }
     }
@@ -53,7 +54,7 @@ impl Game for TicTacToe {
     fn legal_moves(&self) -> Vec<Weighted<usize>> {
        self.board.iter().enumerate().filter(|&(_, x)| x.is_none()).map(|(i, _)| Weighted { weight: self.weight_for(i), item: i }).collect::<Vec<_>>()
     }
-    fn play(&mut self, act: usize) {
+    fn play(&mut self, &act: &usize) {
        self.board[act] = Some(self.current);
        self.current = self.current.enemy();
     }
@@ -65,4 +66,6 @@ impl Game for TicTacToe {
        println!("-+-+-");
        println!("{}|{}|{}", disp(self.board[6]), disp(self.board[7]), disp(self.board[8]));
     }
+    fn parse_move(string: &str) -> usize { string.parse().unwrap() }
+    fn print_move(mv: &usize) { print!("{}", mv) }
 }

@@ -47,11 +47,11 @@ fn mc_score<M>(mc: &MCTree<M>, lnt: f64, explore: f64) -> f64 {
     }
 }
 
-fn print_mc<G: Game>(mc: &MCTree<usize>) {
+fn print_mc<G: Game>(mc: &MCTree<G::Move>) {
     let lnt = (mc.plays as f64).ln();
     let explore = 2.0;
     if let Some(ref rs) = mc.replies {
-        for &(i, ref r) in rs.iter() {
+        for &(ref i, ref r) in rs.iter() {
             G::print_move(i);
             println!(" => {:.5} / {:.5} / {}", r.wins / r.plays as f64, mc_score(r, lnt, explore), r.plays)
         }
@@ -59,7 +59,7 @@ fn print_mc<G: Game>(mc: &MCTree<usize>) {
     println!("");
 }
 
-fn mc_expand<G: Game>(mc: &mut MCTree<usize>, g: &G) {
+fn mc_expand<G: Game>(mc: &mut MCTree<G::Move>, g: &G) where G::Move : PartialEq {
     if mc.replies.is_none() {
         mc.replies = Some({
             let mut reps = Vec::new();
@@ -98,7 +98,7 @@ fn mc_move<'a, M, T: Rng>(rng: &mut T, mc: &'a mut MCTree<M>, explore: f64) -> (
     (&x.0, &mut x.1)
 }
 
-fn random_move<R: Rng, G: Game>(rng: &mut R, g: &G) -> usize {
+fn random_move<R: Rng, G: Game>(rng: &mut R, g: &G) -> G::Move {
     let mut moves = g.playout_moves();
     let dist = WeightedChoice::new(&mut moves[..]);
     dist.ind_sample(rng)
@@ -110,7 +110,7 @@ fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
     loop
     {
         let mv = random_move(rng, g);
-        g.play(mv);
+        g.play(&mv);
         flip = !flip;
         match g.payoff() {
             Some(p) => return if flip { 1.0 - p } else { p },
@@ -119,14 +119,14 @@ fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
     }
 }
 
-fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree<usize>) -> f64 {
+fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree<G::Move>) -> f64 where G::Move : PartialEq {
     let p = 1.0 - match g.payoff() {
         Some(p) => p,
         None => if mc.plays == 0 {
             play_out(rng, g)
         } else {
             mc_expand(mc, g);
-            let (&mv, rep) = mc_move(rng, mc, 2.0);
+            let (mv, rep) = mc_move(rng, mc, 2.0);
             g.play(mv);
             mc_iteration(rng, g, rep)
         }
@@ -137,9 +137,9 @@ fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree<usize>)
 }
 
 #[derive(PartialEq, Clone, Copy)]
-enum Cmd { Move(usize), Gen }
+enum Cmd<M> { Move(M), Gen }
 
-fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>, dones: Sender<bool>) {
+fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>, dones: Sender<bool>) where G::Move : PartialEq {
     let mut rng = rand::weak_rng();
     let mut g = G::init();
     let mut mc = MCTree::new(0);
@@ -150,19 +150,19 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>, dones: Sender<bool>) 
             Err(TryRecvError::Disconnected) => return,
             Ok(Cmd::Move(mv)) => {
                 mc = mc.next(&mv);
-                g.play(mv);
+                g.play(&mv);
                 let done = g.payoff().is_some();
                 dones.send(done).unwrap();
                 if done { return }
             }
             Ok(Cmd::Gen) => {
                 let mv = if mc.replies.is_some() {
-                    *mc_move(&mut rng, &mut mc, 0.0).0
+                    mc_move(&mut rng, &mut mc, 0.0).0.clone()
                 } else {
                     random_move(&mut rng, &g)
                 };
                 mc = mc.next(&mv);
-                g.play(mv);
+                g.play(&mv);
                 g.print();
                 let done = g.payoff().is_some();
                 mvs.send(mv).unwrap();
@@ -175,14 +175,14 @@ fn think<G: Game>(cmds: Receiver<Cmd>, mvs: Sender<usize>, dones: Sender<bool>) 
     }
 }
 
-fn parse_command<G: Game>(string: &str) -> Cmd {
+fn parse_command<G: Game>(string: &str) -> Cmd<G::Move> {
     match string.trim() {
         "gen" => Cmd::Gen,
         x => Cmd::Move(G::parse_move(x))
     }
 }
 
-fn run<G: Game>(think_time: u32) {
+fn run<G: Game>(think_time: u32) where G::Move : Send + PartialEq + 'static {
     let (sendcmd, recvcmd) = channel();
     let (sendmv, recvmv) = channel();
     let (senddone, recvdone) = channel();
@@ -191,12 +191,13 @@ fn run<G: Game>(think_time: u32) {
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
         let cmd = parse_command::<G>(&input);
-        if cmd == Cmd::Gen { thread::sleep_ms(think_time) }
+        let is_gen = if let Cmd::Gen = cmd { true } else { false };
+        if is_gen { thread::sleep_ms(think_time) }
         sendcmd.send(cmd).unwrap();
-        if cmd == Cmd::Gen {
+        if is_gen {
             let mv = recvmv.recv().unwrap();
             print!("!");
-            G::print_move(mv);
+            G::print_move(&mv);
             println!("");
         }
         if recvdone.recv().unwrap() { return }
