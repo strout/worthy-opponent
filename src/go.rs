@@ -76,7 +76,7 @@ fn capture_inner(c: Space, p: Pos, b: &Board, captured: &mut BitSet) -> bool {
             Empty => return false,
             c2 => if c == c2 {
                 captured.insert(p);
-                for p in neighbors(p).iter().filter_map(Option::clone) {
+                for &p in neighbors(p).iter().flat_map(|x| x) {
                     if !capture_inner(c, p, b, captured) { return false }
                 }
             }
