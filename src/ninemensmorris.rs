@@ -179,7 +179,7 @@ impl Game for NineMensMorris {
     }
     fn play(&mut self, &Move { from, to, remove }: &Move) {
         let mut removed = 0;
-        let mut added = 0;
+        let mut added = 1;
         let c = self.current_player();
         self.board[to] = c;
         if let Some(x) = from { self.board[x] = Empty; added -= 1; }
