@@ -183,17 +183,15 @@ fn make_board(komi: f32) -> Board {
     BoardOf { dat: vec![Empty; len], komi: komi }
 }
 
-pub type GoState = (Board, History, Space, usize, bool);
+pub type GoState = (Board, History, Space, usize);
 
 impl Game for GoState {
     type Move = usize;
     fn init() -> GoState {
-        (make_board(0.0), History::new(), Black, 0, false)
+        (make_board(0.0), History::new(), Black, 0)
     }
     fn payoff(&self) -> Option<f64> {
-        if self.4 {
-            Some(1.0) // opponent made an illegal play; we win
-        } else if self.3 > 1 {
+        if self.3 > 1 {
             let (b, w) = score(&self.0);
             if b == w { Some(0.5) }
             else if (b > w) ^ (self.2 == Black) { Some(0.0) }
@@ -213,11 +211,10 @@ impl Game for GoState {
         moves
     }
     fn play(&mut self, &act: &usize) {
-        if act >= SIZE * SIZE {
+        if act >= SIZE * SIZE || !play(self.2, act, &mut self.0, &mut self.1) {
             self.3 += 1
         } else {
             self.3 = 0;
-            self.4 = !play(self.2, act, &mut self.0, &mut self.1);
         }
         self.2 = self.2.enemy();
     }
