@@ -97,15 +97,15 @@ static ADJACENT_SPACES : [&'static [usize]; 24] = [
 ];
 
 impl NineMensMorris {
-    fn current_player(&self) -> Color { if self.turn % 2 == 0 { Black } else { White } }
+    fn current_player(&self) -> Space { if self.turn % 2 == 0 { Black } else { White } }
     fn forms_mill(&self, x: usize) -> bool { self.possible_mills_for(x).len() > 0 }
     fn forms_mill_without(&self, x: usize, y: usize) -> bool { self.possible_mills_for(x).iter().filter(|m| !m.contains(&y)).count() > 0 }
     fn possible_mills_for(&self, x: usize) -> Vec<&'static [usize; 2]> {
-        let c = Some(self.current_player());
+        let c = self.current_player();
         MILLS_BY_SPACE[x].iter().filter(|m| m.iter().all(|&y| c == self.board[y])).collect()
     }
     fn removable_pieces(&self) -> BitSet {
-        let c = Some(self.current_player().enemy());
+        let c = self.current_player().enemy();
         let mut in_mills = BitSet::with_capacity(24);
         let mut out_of_mills = BitSet::with_capacity(24);
         for i in 0..self.board.len() {
@@ -121,7 +121,7 @@ impl NineMensMorris {
     }
     fn adjacent_free(&self, x: usize) -> BitSet {
         let mut ret = ADJACENT_SPACES[x].iter().cloned().collect::<BitSet>();
-        for (i, x) in self.board.iter().enumerate() { if x.is_some() { ret.remove(&i); } };
+        for (i, x) in self.board.iter().enumerate() { if x.is_filled() { ret.remove(&i); } };
         ret
     }
 }
@@ -129,7 +129,7 @@ impl NineMensMorris {
 impl Game for NineMensMorris {
     type Move = Move;
     fn init() -> NineMensMorris {
-        NineMensMorris { board: [None; 24], turn: 0 }
+        NineMensMorris { board: [Empty; 24], turn: 0 }
     }
     fn payoff(&self) -> Option<f64> {
         if self.turn < 18 {
@@ -139,15 +139,15 @@ impl Game for NineMensMorris {
             let mut whites = 0;
             for &x in self.board.iter() {
                 match x {
-                    Some(Black) => blacks += 1,
-                    Some(White) => whites += 1,
+                    Black => blacks += 1,
+                    White => whites += 1,
                     _ => {}
                 }
             }
             let (mine, yours) = if self.current_player() == Black { (blacks, whites) } else { (whites, blacks) };
             let no_adjacent_moves = || {
-                let mut ss = self.board.iter().enumerate().filter_map(|(i, &x)| if x == Some(self.current_player()) { Some(i) } else { None });
-                ss.all(|s| ADJACENT_SPACES[s].iter().all(|&x| self.board[x].is_some()))
+                let mut ss = self.board.iter().enumerate().filter_map(|(i, &x)| if x == self.current_player() { Some(i) } else { None });
+                ss.all(|s| ADJACENT_SPACES[s].iter().all(|&x| self.board[x].is_filled()))
             };
             if yours <= 2 { Some(1.0) }
             else if mine <= 2 { Some(0.0) }
@@ -158,7 +158,7 @@ impl Game for NineMensMorris {
     fn legal_moves(&self) -> Vec<Weighted<Move>> {
         let mut ret = vec![];
         if self.turn < 18 {
-           for d in self.board.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(i) } else { None }) {
+           for d in self.board.iter().enumerate().filter_map(|(i, x)| if x.is_empty() { Some(i) } else { None }) {
                if self.forms_mill(d) {
                    for r in self.removable_pieces().iter() {
                        ret.push(Weighted { weight: 2, item: Move { from: None, to: d, remove: Some(r) } });
@@ -168,9 +168,9 @@ impl Game for NineMensMorris {
                }
            }
         } else {
-           let c = Some(self.current_player());
+           let c = self.current_player();
            for s in self.board.iter().enumerate().filter_map(|(i, &x)| if x == c { Some(i) } else { None }) {
-               for d in if self.board.iter().filter(|&&x| x == c).count() == 3 { self.board.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(i) } else { None }).collect() } else { self.adjacent_free(s) }.into_iter() {
+               for d in if self.board.iter().filter(|&&x| x == c).count() == 3 { self.board.iter().enumerate().filter_map(|(i, x)| if x.is_empty() { Some(i) } else { None }).collect() } else { self.adjacent_free(s) }.into_iter() {
                    if self.forms_mill_without(d, s) {
                        for r in self.removable_pieces().iter() {
                            ret.push(Weighted { weight: 2, item: Move { from: Some(s), to: d, remove: Some(r) } });
@@ -184,13 +184,13 @@ impl Game for NineMensMorris {
         ret
     }
     fn play(&mut self, &Move { from, to, remove }: &Move) {
-        self.board[to] = Some(self.current_player());
-        if let Some(x) = from { self.board[x] = None; }
-        if let Some(x) = remove { self.board[x] = None; }
+        self.board[to] = self.current_player();
+        if let Some(x) = from { self.board[x] = Empty; }
+        if let Some(x) = remove { self.board[x] = Empty; }
         self.turn += 1;
     }
     fn print(&self) {
-        let disp = |x| match x { None => ' ', Some(Black) => 'X', Some(White) => 'O' };
+        let disp = |x| match x { Empty => ' ', Black => 'X', White => 'O' };
         println!("{}----{}----{}", disp(self.board[0]), disp(self.board[1]), disp(self.board[2]));
         println!("|         |");
         println!("| {}--{}--{} |", disp(self.board[3]), disp(self.board[4]), disp(self.board[5]));

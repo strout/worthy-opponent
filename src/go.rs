@@ -35,10 +35,10 @@ fn neighbors(p: Pos) -> [Option<usize>; 4] {
 fn owner_inner(c: Space, p: Pos, b: &Board, visited: &mut BitSet, white: bool, black: bool) -> (bool, bool, usize) {
     let c2 = b.dat[p];
     let (mut black, mut white) = match (c, c2) {
-        (None, Some(White)) => (black, true),
-            (None, Some(Black)) => (true, white),
-            (None, None) => (black, white),
-            (Some(c1), _) => (c1 == Black, c1 == White) // TODO this comparison will run WAY too many times!
+        (Empty, White) => (black, true),
+        (Empty, Black) => (true, white),
+        (Empty, Empty) => (black, white),
+        (c1, _) => (c1 == Black, c1 == White) // TODO this comparison will run WAY too many times!
     };
     if c == c2 {
         if visited.contains(&p) { return (black, white, 0) }
@@ -70,7 +70,7 @@ fn score(board: &Board) -> (f32, f32) {
     (b, w + board.komi)
 }
 
-fn capture(c: Color, p: Pos, b: &Board) -> BitSet {
+fn capture(c: Space, p: Pos, b: &Board) -> BitSet {
     let mut captured = BitSet::with_capacity(SIZE * SIZE);
     let mut stack = vec![p];
     loop {
@@ -78,8 +78,8 @@ fn capture(c: Color, p: Pos, b: &Board) -> BitSet {
             None => return captured,
                  Some(p) => if !captured.contains(&p) {
                      match b.dat[p] {
-                         None => return BitSet::new(),
-                         Some(c2) => if c == c2 {
+                         Empty => return BitSet::new(),
+                         c2 => if c == c2 {
                              captured.insert(p);
                              stack.extend(neighbors(p).iter().filter_map(Option::clone))
                          }
@@ -89,38 +89,38 @@ fn capture(c: Color, p: Pos, b: &Board) -> BitSet {
     }
 }
 
-fn legal(c: Color, p: Pos, board: &Board, h: &History) -> bool {
-    if board.dat[p].is_some() { return false }
+fn legal(c: Space, p: Pos, board: &Board, h: &History) -> bool {
+    if board.dat[p].is_filled() { return false }
     let mut board = board.clone();
-    board.dat[p] = Some(c);
+    board.dat[p] = c;
     let oc = c.enemy();
     let mut captured = BitSet::with_capacity(SIZE * SIZE);
     for &p in neighbors(p).into_iter().flat_map(|x| x) {
         captured.union_with(&capture(oc, p, &board))
     }
-    for p in captured.iter() { board.dat[p] = None; }
+    for p in captured.iter() { board.dat[p] = Empty; }
     let self_captured = capture(c, p, &board);
-    for p in self_captured.iter() { board.dat[p] = None; }
+    for p in self_captured.iter() { board.dat[p] = Empty; }
     let bad = h.contains(board.dat.iter());
     !bad
 }
 
-fn play(c: Color, p: Pos, board: &mut Board, h: &mut History) -> bool {
-    if board.dat[p].is_some() { return false }
-    board.dat[p] = Some(c);
+fn play(c: Space, p: Pos, board: &mut Board, h: &mut History) -> bool {
+    if board.dat[p].is_filled() { return false }
+    board.dat[p] = c;
     let oc = c.enemy();
     let mut captured = BitSet::with_capacity(SIZE * SIZE);
     for &p in neighbors(p).into_iter().flat_map(|x| x) {
         captured.union_with(&capture(oc, p, &board))
     }
-    for p in captured.iter() { board.dat[p] = None; }
+    for p in captured.iter() { board.dat[p] = Empty; }
     let self_captured = capture(c, p, &board);
-    for p in self_captured.iter() { board.dat[p] = None; }
+    for p in self_captured.iter() { board.dat[p] = Empty; }
     let ok = h.insert(board.dat.iter().cloned());
     if !ok {
-        for p in self_captured.iter() { board.dat[p] = Some(c); }
-        for p in captured.iter() { board.dat[p] = Some(oc); }
-        board.dat[p] = None;
+        for p in self_captured.iter() { board.dat[p] = c; }
+        for p in captured.iter() { board.dat[p] = oc; }
+        board.dat[p] = Empty;
     }
     ok
 }
@@ -129,8 +129,8 @@ fn weigh_move(g: &GoState, p: Pos, check: bool) -> u32 {
     if neighbors(p).into_iter().filter_map(|&x| x).any(|p| {
         let x = g.0.dat[p];
         match x {
-            None => false,
-            Some(c) => neighbors(p).into_iter().filter_map(|&x| x).filter(|&p| g.0.dat[p] != Some(c.enemy())).count() == 1
+            Empty => false,
+            c => neighbors(p).into_iter().filter_map(|&x| x).filter(|&p| g.0.dat[p] != c.enemy()).count() == 1
         }
     }) {
         if !check || legal(g.2, p, &g.0, &g.1) {
@@ -169,7 +169,7 @@ fn print_board(b: &Board) {
     for y in (0..SIZE).rev() {
         print!("{: >2} ", y + 1);
         for x in 0..SIZE {
-            print!("{} ", match b.dat[x + y * SIZE] { None => '.', Some(Black) => 'X', Some(White) => 'O'});
+            print!("{} ", match b.dat[x + y * SIZE] { Empty => '.', Black => 'X', White => 'O'});
         }
         println!("{}", y + 1);
     }
@@ -180,10 +180,10 @@ fn print_board(b: &Board) {
 
 fn make_board(komi: f32) -> Board {
     let len = SIZE * SIZE;
-    BoardOf { dat: vec![None; len], komi: komi }
+    BoardOf { dat: vec![Empty; len], komi: komi }
 }
 
-pub type GoState = (Board, History, Color, usize, bool);
+pub type GoState = (Board, History, Space, usize, bool);
 
 impl Game for GoState {
     type Move = usize;
@@ -208,7 +208,7 @@ impl Game for GoState {
     }
     fn playout_moves(&self) -> Vec<Weighted<usize>> {
         let max = SIZE * SIZE;
-        let mut moves = self.0.dat.iter().enumerate().filter_map(|(i, x)| if x.is_none() { Some(Weighted { weight: weigh_move(&self, i, true), item: i }) } else { None }).collect::<Vec<_>>();
+        let mut moves = self.0.dat.iter().enumerate().filter_map(|(i, x)| if x.is_empty() { Some(Weighted { weight: weigh_move(&self, i, true), item: i }) } else { None }).collect::<Vec<_>>();
         moves.push(Weighted { weight: 1, item: max });
         moves
     }
@@ -228,4 +228,34 @@ impl Game for GoState {
         parse_pos(string).expect("Bad move.")
     }
     fn print_move(&mv: &usize) { print_pos(mv) }
+}
+
+#[cfg(test)]
+mod tests {
+    use game::Game;
+    use super::*;
+    use test::Bencher;
+    use rand::{weak_rng, Rng};
+
+    #[bench]
+    fn play_legal_move(bench: &mut Bencher) {
+        let mut rng = weak_rng();
+        let mut go = GoState::init();
+        bench.iter(|| {
+            let mvs = go.legal_moves();
+            let mv = rng.choose(&mvs[..]).unwrap().item;
+            go.play(&mv);
+        });
+    }
+
+    #[bench]
+    fn play_playout_move(bench: &mut Bencher) {
+        let mut rng = weak_rng();
+        let mut go = GoState::init();
+        bench.iter(|| {
+            let mvs = go.playout_moves();
+            let mv = rng.choose(&mvs[..]).unwrap().item;
+            go.play(&mv);
+        });
+    }
 }
