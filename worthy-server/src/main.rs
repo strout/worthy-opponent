@@ -36,9 +36,12 @@ fn relay<R: BufRead, W: Write>(r: R, w: &mut W, prefix: &str) {
             w.write(b"\ngen\n").unwrap();
             w.flush().unwrap();
         } else if line.starts_with(";") {
-            match &line[1..] {
-                "bye" => return,
-                x => panic!("Unknown command: {}", x)
+            if line[1..].starts_with("bye ") {
+                let score : f64 = line[5..].parse().unwrap();
+                println!("{} scores {}", prefix, score);
+                return
+            } else {
+                panic!("Unknown command: {}", &line[1..]);
             }
         } else {
             println!("{}: {}", prefix, line);

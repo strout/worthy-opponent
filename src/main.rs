@@ -139,7 +139,7 @@ pub fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree<G::
 #[derive(PartialEq, Clone, Copy)]
 enum Cmd<M> { Move(M), Gen }
 
-fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>, dones: Sender<bool>) where G::Move : PartialEq {
+fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>, payoffs: Sender<Option<f64>>) where G::Move : PartialEq {
     let mut rng = rand::weak_rng();
     let mut g = G::init();
     let mut mc = MCTree::new(0);
@@ -151,9 +151,9 @@ fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>, dones: Sen
             Ok(Cmd::Move(mv)) => {
                 mc = mc.next(&mv);
                 g.play(&mv);
-                let done = g.payoff().is_some();
-                dones.send(done).unwrap();
-                if done { return }
+                let payoff = g.payoff();
+                payoffs.send(payoff).unwrap();
+                if payoff.is_some() { return }
             }
             Ok(Cmd::Gen) => {
                 let mv = if mc.replies.is_some() {
@@ -164,10 +164,10 @@ fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>, dones: Sen
                 mc = mc.next(&mv);
                 g.play(&mv);
                 g.print();
-                let done = g.payoff().is_some();
+                let payoff = g.payoff();
                 mvs.send(mv).unwrap();
-                dones.send(done).unwrap();
-                if done { return }
+                payoffs.send(payoff.map(|p| 1.0 - p)).unwrap();
+                if payoff.is_some() { return }
             }
         }
         g2.clone_from(&g);
@@ -185,22 +185,24 @@ fn parse_command<G: Game>(string: &str) -> Cmd<G::Move> {
 fn run<G: Game>(think_time: u32) where G::Move : Send + PartialEq + 'static {
     let (sendcmd, recvcmd) = channel();
     let (sendmv, recvmv) = channel();
-    let (senddone, recvdone) = channel();
-    thread::spawn(move || think::<G>(recvcmd, sendmv, senddone));
+    let (sendpayoff, recvpayoff) = channel();
+    thread::spawn(move || think::<G>(recvcmd, sendmv, sendpayoff));
     loop {
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
         let cmd = parse_command::<G>(&input);
         let is_gen = if let Cmd::Gen = cmd { true } else { false };
         if is_gen { thread::sleep_ms(think_time) }
-        sendcmd.send(cmd).unwrap();
-        if is_gen {
+        sendcmd.send(cmd).unwrap(); if is_gen {
             let mv = recvmv.recv().unwrap();
             print!("!");
             G::print_move(&mv);
             println!("");
         }
-        if recvdone.recv().unwrap() { return }
+        if let Some(payoff) = recvpayoff.recv().unwrap() {
+            println!(";bye {}", payoff);
+            return;
+        }
     }
 }
 
@@ -213,7 +215,6 @@ fn main() {
         "g" => run::<go::Go>(think_time),
         x => panic!("I don't know how to play '{}'.", x)
     }
-    println!(";bye");
 }
 
 #[cfg(test)]
