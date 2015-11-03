@@ -12,7 +12,10 @@ use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 use rand::Rng;
 use rand::distributions::{Weighted, WeightedChoice, IndependentSample};
-use std::io;
+use std::io::{BufReader, BufRead, Write};
+use std::collections::HashMap;
+use std::fmt::Display;
+use std::str::from_utf8;
 
 mod game;
 mod basics;
@@ -21,6 +24,9 @@ mod tictactoe;
 mod ninemensmorris;
 
 use game::Game;
+use tictactoe::TicTacToe;
+use ninemensmorris::NineMensMorris;
+use go::Go;
 
 pub struct MCTree<M> {
     wins: f64,
@@ -47,19 +53,18 @@ fn mc_score<M>(mc: &MCTree<M>, lnt: f64, explore: f64) -> f64 {
     }
 }
 
-fn print_mc<G: Game>(mc: &MCTree<G::Move>) {
+fn print_mc<M>(mc: &MCTree<M>) where M: Display {
     let lnt = (mc.plays as f64).ln();
     let explore = 2.0;
     if let Some(ref rs) = mc.replies {
-        for &(ref i, ref r) in rs.iter() {
-            G::print_move(i);
-            println!(" => {:.5} / {:.5} / {}", r.wins / r.plays as f64, mc_score(r, lnt, explore), r.plays)
+        for &(ref m, ref r) in rs.iter() {
+            println!("{} => {:.5} / {:.5} / {}", m, r.wins / r.plays as f64, mc_score(r, lnt, explore), r.plays)
         }
     }
     println!("");
 }
 
-fn mc_expand<G: Game>(mc: &mut MCTree<G::Move>, g: &G) where G::Move : PartialEq {
+fn mc_expand<G: Game>(mc: &mut MCTree<G::Move>, g: &G) {
     if mc.replies.is_none() {
         mc.replies = Some({
             let mut reps = Vec::new();
@@ -74,7 +79,7 @@ fn mc_expand<G: Game>(mc: &mut MCTree<G::Move>, g: &G) where G::Move : PartialEq
 
 fn mc_move<'a, M, T: Rng>(rng: &mut T, mc: &'a mut MCTree<M>, explore: f64) -> (&'a M, &'a mut MCTree<M>) {
     let lnt = (mc.plays as f64).ln();
-    debug_assert_eq!(mc.plays, mc.replies.as_ref().unwrap().iter().fold(0, |acc, &(_, ref r)| acc + r.plays) + 1);
+    // TODO should this be true? Possibly. debug_assert_eq!(mc.plays, mc.replies.as_ref().unwrap().iter().fold(0, |acc, &(_, ref r)| acc + r.plays) + 1);
     let mut best_score = std::f64::NEG_INFINITY;
     let mut best_urgency = 0;
     let mut best = None;
@@ -119,7 +124,7 @@ fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
     }
 }
 
-pub fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree<G::Move>) -> f64 where G::Move : PartialEq {
+pub fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree<G::Move>) -> f64 {
     let p = 1.0 - match g.payoff() {
         Some(p) => p,
         None => if mc.plays == 0 {
@@ -137,23 +142,25 @@ pub fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree<G::
 }
 
 #[derive(PartialEq, Clone, Copy)]
-enum Cmd<M> { Move(M), Gen }
+enum Cmd<M> { Move(M), Gen, Reset }
 
-fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>, payoffs: Sender<Option<f64>>) where G::Move : PartialEq {
+fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>) {
     let mut rng = rand::weak_rng();
     let mut g = G::init();
     let mut mc = MCTree::new(0);
-    let mut g2 = g.clone();
     loop {
         match cmds.try_recv() {
             Err(TryRecvError::Empty) => {},
             Err(TryRecvError::Disconnected) => return,
+            Ok(Cmd::Reset) => {
+                mc = MCTree::new(0);
+                g = G::init()
+            }
             Ok(Cmd::Move(mv)) => {
                 mc = mc.next(&mv);
                 g.play(&mv);
-                let payoff = g.payoff();
-                payoffs.send(payoff).unwrap();
-                if payoff.is_some() { return }
+                g.print();
+                if g.payoff().is_some() { return }
             }
             Ok(Cmd::Gen) => {
                 let mv = if mc.replies.is_some() {
@@ -161,59 +168,96 @@ fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>, payoffs: S
                 } else {
                     random_move(&mut rng, &g)
                 };
-                mc = mc.next(&mv);
-                g.play(&mv);
-                g.print();
-                let payoff = g.payoff();
+                print_mc(&mc);
                 mvs.send(mv).unwrap();
-                payoffs.send(payoff.map(|p| 1.0 - p)).unwrap();
-                if payoff.is_some() { return }
+                if g.payoff().is_some() { return }
             }
         }
-        g2.clone_from(&g);
-        mc_iteration(&mut rng, &mut g2, &mut mc);
+        mc_iteration(&mut rng, &mut g.clone(), &mut mc);
     }
 }
 
-fn parse_command<G: Game>(string: &str) -> Cmd<G::Move> {
-    match string.trim() {
-        "gen" => Cmd::Gen,
-        x => Cmd::Move(G::parse_move(x))
-    }
-}
-
-fn run<G: Game>(think_time: u32) where G::Move : Send + PartialEq + 'static {
+fn run<'a, G: Game, R: BufRead, W: Write>(think_ms: u32, input: &mut R, output: &mut W) where G::Move: 'static {
     let (sendcmd, recvcmd) = channel();
     let (sendmv, recvmv) = channel();
-    let (sendpayoff, recvpayoff) = channel();
-    thread::spawn(move || think::<G>(recvcmd, sendmv, sendpayoff));
+    thread::spawn(move || think::<G>(recvcmd, sendmv));
+    let mut buf = vec![];
     loop {
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
-        let cmd = parse_command::<G>(&input);
+        buf.clear();
+        input.read_until(0, &mut buf).unwrap();
+        let buf_str = from_utf8(&buf).unwrap();
+        println!("Got: {}", &buf_str[..buf_str.len()-1]);
+        let cscmd = parse_client_server_command(buf_str).unwrap();
+        let cmd = match cscmd.name {
+            "update-game-state" => cscmd.args.get("move").and_then(|m| m.parse().ok().map(|m| Cmd::Move(m))).unwrap_or_else(|| cscmd.args.get("state").map(|s| {
+                if s.len() == 0 { return Cmd::Reset }
+                s[s.len()-1..].parse().map(|m| Cmd::Move(m)).unwrap_or_else(|_| panic!("Couldn't parse state '{}'.", s))
+            }).unwrap()),
+            "make-move" => Cmd::Gen,
+            "announce-winner" => return,
+            x => panic!("Protocol error! I don't know the command '{}'.", x)
+        };
         let is_gen = if let Cmd::Gen = cmd { true } else { false };
-        if is_gen { thread::sleep_ms(think_time) }
-        sendcmd.send(cmd).unwrap(); if is_gen {
+        if is_gen { thread::sleep_ms(think_ms) }
+        sendcmd.send(cmd).unwrap();
+        if is_gen {
             let mv = recvmv.recv().unwrap();
-            print!("!");
-            G::print_move(&mv);
-            println!("");
-        }
-        if let Some(payoff) = recvpayoff.recv().unwrap() {
-            println!(";bye {}", payoff);
-            return;
+            output.write_fmt(format_args!("move {}\0", mv)).unwrap();
+        } else {
+            output.write(b"ready\0").unwrap();
         }
     }
+}
+
+#[derive(Debug)]
+struct ClientServerCmd<'a> {
+    name: &'a str,
+    args: HashMap<&'a str, &'a str>
+}
+
+fn parse_client_server_command(string: &str) -> Option<ClientServerCmd> {
+    let string = &string[..string.len() - 1]; // avoid the \0 at the end
+    let mut name_and_args = string.split(' ');
+    name_and_args.next().and_then(|name| {
+        let args = name_and_args.map(|arg| {
+            let mut arg_parts = arg.splitn(2, '=');
+            arg_parts.next().and_then(|arg_name| arg_parts.next().map(|arg_val| (arg_name, arg_val)))
+        });
+        let mut acc = HashMap::new();
+        for mkv in args { match mkv {
+            None => return None,
+            Some((k, v)) => { acc.insert(k, v); }
+        }}
+        Some(ClientServerCmd { name: name, args: acc })
+    })
 }
 
 fn main() {
-    let game = std::env::args().nth(1).expect("Please supply a game (t = Tic-Tac-Toe, n = Nine Men's Morris, g = Go)");
-    let think_time = std::env::args().nth(2).and_then(|tt| tt.parse().ok()).expect("Please supply a thinking time (in milliseconds)");
-    match game.as_ref() {
-        "t" => run::<tictactoe::TicTacToe>(think_time),
-        "n" => run::<ninemensmorris::NineMensMorris>(think_time),
-        "g" => run::<go::Go>(think_time),
-        x => panic!("I don't know how to play '{}'.", x)
+    use std::net::TcpStream;
+    let stream = TcpStream::connect("192.168.0.200:11873").unwrap();
+    let mut input = BufReader::new(stream.try_clone().unwrap());
+    let mut output = stream;
+    let mut buf = vec![];
+    output.write(b"bot:worthy-opponent\0").unwrap();
+    input.read_until(0, &mut buf).unwrap();
+    assert_eq!(b"bot:worthy-opponent\0", &buf[..]);
+    loop {
+        buf.clear();
+        input.read_until(0, &mut buf).unwrap();
+        let cmd = parse_client_server_command(from_utf8(&buf).unwrap()).unwrap();
+        match cmd.name {
+            "prepare-new-game" => {
+                let think_ms = cmd.args["milliseconds-per-move"].parse().unwrap();
+                output.write(b"ready\0").unwrap();
+                match cmd.args["game"] {
+                    "tictactoe" => run::<TicTacToe,_,_>(think_ms, &mut input, &mut output),
+                    "ninemensmorris" => run::<NineMensMorris,_,_>(think_ms, &mut input, &mut output),
+                    "go" => run::<Go,_,_>(think_ms, &mut input, &mut output),
+                    x => panic!("I don't know how to play {}.", x)
+                };
+            },
+            x => panic!("Protocol error! I don't know the command '{}'.", x)
+        }
     }
 }
 
@@ -227,12 +271,11 @@ mod tests {
     use ninemensmorris::NineMensMorris;
     use tictactoe::TicTacToe;
 
-    fn bench_mc_iteration<G: Game>(bench: &mut Bencher) where G::Move : PartialEq {
+    fn bench_mc_iteration<G: Game>(bench: &mut Bencher) {
         let mut mc = MCTree::new(0);
-        let mut g = G::init();
-        let mut g2 = g.clone();
+        let g = G::init();
         let mut rng = weak_rng();
-        bench.iter(|| { g2.clone_from(&g); mc_iteration(&mut rng, &mut g2, &mut mc); })
+        bench.iter(|| { let mut g2 = g.clone(); mc_iteration(&mut rng, &mut g2, &mut mc); })
     }
 
     #[bench]
