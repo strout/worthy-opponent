@@ -11,19 +11,22 @@ fn main() {
 
     let mut connections = listener.incoming();
 
-    let mut player1 = connections.next().unwrap().unwrap();
-    let mut player2 = connections.next().unwrap().unwrap();
+    println!("Waiting for players...");
+    loop {
+        let mut player1 = connections.next().unwrap().unwrap();
+        let mut player2 = connections.next().unwrap().unwrap();
 
-    if random() { swap(&mut player1, &mut player2) }
+        if random() { swap(&mut player1, &mut player2) }
 
-    let p1_in = BufReader::new(player1.try_clone().unwrap());
-    let p2_in = BufReader::new(player2.try_clone().unwrap());
+        let p1_in = BufReader::new(player1.try_clone().unwrap());
+        let p2_in = BufReader::new(player2.try_clone().unwrap());
 
-    player1.write(b"gen\n").unwrap();
-    player1.flush().unwrap();
+        player1.write(b"gen\n").unwrap();
+        player1.flush().unwrap();
 
-    spawn(move || relay(p1_in, &mut player2, "p1"));
-    relay(p2_in, &mut player1, "p2");
+        spawn(move || relay(p1_in, &mut player2, "p1"));
+        spawn(move || relay(p2_in, &mut player1, "p2"));
+    }
 }
 
 fn relay<R: BufRead, W: Write>(r: R, w: &mut W, prefix: &str) {
