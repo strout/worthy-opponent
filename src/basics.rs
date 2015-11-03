@@ -5,24 +5,12 @@ pub use self::Space::*;
 #[cfg(test)]
 use quickcheck::{Gen, Arbitrary};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct History {
     items: Vec<Space>,
     black : Option<Box<History>>,
     white : Option<Box<History>>,
     empty : Option<Box<History>>
-}
-
-impl Clone for History {
-    fn clone(self: &History) -> History {
-        History { items: self.items.clone(), black: self.black.clone(), white: self.white.clone(), empty: self.empty.clone() }
-    }
-    fn clone_from(self: &mut History, other: &History) {
-        self.items.clone_from(&other.items);
-        self.black.clone_from(&other.black);
-        self.white.clone_from(&other.white);
-        self.empty.clone_from(&other.empty);
-    }
 }
 
 impl History {
