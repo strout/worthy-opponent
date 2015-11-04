@@ -189,10 +189,7 @@ fn run<'a, G: Game, R: BufRead, W: Write>(think_ms: u32, input: &mut R, output: 
         println!("Got: {}", &buf_str[..buf_str.len()-1]);
         let cscmd = parse_client_server_command(buf_str).unwrap();
         let cmd = match cscmd.name {
-            "update-game-state" => cscmd.args.get("move").and_then(|m| m.parse().ok().map(|m| Cmd::Move(m))).unwrap_or_else(|| cscmd.args.get("state").map(|s| {
-                if s.len() == 0 { return Cmd::Reset }
-                s[s.len()-1..].parse().map(|m| Cmd::Move(m)).unwrap_or_else(|_| panic!("Couldn't parse state '{}'.", s))
-            }).unwrap()),
+            "update-game-state" => cscmd.args.get("state").and_then(|x| G::parse_move(x)).map(Cmd::Move).unwrap_or(Cmd::Reset),
             "make-move" => Cmd::Gen,
             "announce-winner" => return,
             x => panic!("Protocol error! I don't know the command '{}'.", x)

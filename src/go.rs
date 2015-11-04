@@ -203,8 +203,8 @@ impl Game for Go {
     fn print(&self) {
         print_board(&self.board[..]);
     }
-    fn parse_move(string: &str) -> usize {
-        parse_pos(string).expect("Bad move.")
+    fn parse_move(string: &str) -> Option<usize> {
+        parse_pos(string)
     }
     fn print_move(&mv: &usize) { print_pos(mv) }
 }

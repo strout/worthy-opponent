@@ -10,6 +10,6 @@ pub trait Game : Clone {
     fn playout_moves(&self) -> Vec<Weighted<Self::Move>> { self.legal_moves() }
     fn play(&mut self, &Self::Move);
     fn print(&self);
-    fn parse_move(string: &str) -> Self::Move;
+    fn parse_move(string: &str) -> Option<Self::Move>;
     fn print_move(mv: &Self::Move);
 }

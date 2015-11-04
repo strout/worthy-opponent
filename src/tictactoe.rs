@@ -66,6 +66,6 @@ impl Game for TicTacToe {
        println!("-+-+-");
        println!("{}|{}|{}", disp(self.board[6]), disp(self.board[7]), disp(self.board[8]));
     }
-    fn parse_move(string: &str) -> usize { string.parse().unwrap() }
+    fn parse_move(string: &str) -> Option<usize> { string.as_bytes().last().map(|b| (b - b'0') as usize) }
     fn print_move(mv: &usize) { print!("{}", mv) }
 }

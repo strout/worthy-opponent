@@ -10,7 +10,8 @@ pub struct NineMensMorris {
     board: [Space; 24],
     turn: usize,
     black_pieces: usize,
-    white_pieces: usize
+    white_pieces: usize,
+    history: History
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,28 +20,25 @@ pub struct Move { from: Option<usize>, to: usize, remove: Option<usize> }
 impl FromStr for Move {
     type Err = ();
     fn from_str(s: &str) -> Result<Move, ()> {
-        let encoded = match s.parse::<usize>() {
-            Ok(x) => x,
-            Err(_) => return Err(())
-        };
-        let (d, s_and_r) = (encoded % 24, encoded / 24);
-        let (maybe_s, maybe_r) = (s_and_r % 25, s_and_r / 25);
-        let s = match maybe_s {
-            0 => None,
-            x => Some(x - 1)
-        };
-        let r = match maybe_r {
-            0 => None,
-            x => Some(x - 1)
-        };
-        Ok(Move{ from: s, to: d, remove: r })
+        let mut ss = s.split(',');
+        let f: isize = try!(ss.next().and_then(|s| s.parse().ok()).ok_or(()));
+        let t: usize = try!(ss.next().and_then(|s| s.parse().ok()).ok_or(()));
+        let r: isize = try!(ss.next().and_then(|s| s.parse().ok()).ok_or(()));
+        Ok(Move {
+            from: if f < 0 { None } else { Some(f as usize) },
+            to: t,
+            remove: if r < 0 { None } else { Some(r as usize) }
+        })
     }
 }
 
 impl Display for Move {
     fn fmt(&self, formatter: &mut Formatter) -> Result<(), fmt::Error> {
-        let val = self.to + 24 * (match self.from { None => 0, Some(x) => x + 1 } + 25 * match self.remove { None => 0, Some(x) => x + 1 });
-        val.fmt(formatter)
+        try!(self.from.map(|x| x as isize).unwrap_or(-1).fmt(formatter));
+        try!(','.fmt(formatter));
+        try!(self.to.fmt(formatter));
+        try!(','.fmt(formatter));
+        self.remove.map(|x| x as isize).unwrap_or(-1).fmt(formatter)
     }
 }
 
@@ -131,7 +129,7 @@ impl NineMensMorris {
 impl Game for NineMensMorris {
     type Move = Move;
     fn init() -> NineMensMorris {
-        NineMensMorris { board: [Empty; 24], turn: 0, black_pieces: 0, white_pieces: 0 }
+        NineMensMorris { board: [Empty; 24], turn: 0, black_pieces: 0, white_pieces: 0, history: History::new() }
     }
     fn payoff(&self) -> Option<f64> {
         if self.turn < 18 {
@@ -146,6 +144,7 @@ impl Game for NineMensMorris {
             if yours <= 2 { Some(1.0) }
             else if mine <= 2 { Some(0.0) }
             else if mine > 3 && no_adjacent_moves() { Some(0.0) }
+            else if self.history.contains(self.board.iter()) { Some(0.0) }
             else { None }
         }
     }
@@ -181,8 +180,8 @@ impl Game for NineMensMorris {
         let mut removed = 0;
         let mut added = 1;
         let c = self.current_player();
+        if let Some(x) = from { self.history.insert(self.board.iter().cloned()); self.board[x] = Empty; added -= 1; }
         self.board[to] = c;
-        if let Some(x) = from { self.board[x] = Empty; added -= 1; }
         if let Some(x) = remove { self.board[x] = Empty; removed += 1; }
         self.turn += 1;
         if c == Black { self.black_pieces += added; self.white_pieces -= removed }
@@ -202,6 +201,6 @@ impl Game for NineMensMorris {
         println!("|         |");
         println!("{}----{}----{}", disp(self.board[21]), disp(self.board[22]), disp(self.board[23]));
     }
-    fn parse_move(string: &str) -> Move { string.parse().unwrap() }
+    fn parse_move(string: &str) -> Option<Move> { string.split(';').last().and_then(|s| s.parse().ok()) }
     fn print_move(mv: &Move) { print!("{}", mv) }
 }
