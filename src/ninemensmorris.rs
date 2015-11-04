@@ -42,7 +42,7 @@ impl Display for Move {
     }
 }
 
-static MILLS_BY_SPACE : [[[usize; 2]; 2]; 24] = [
+pub static MILLS_BY_SPACE : [[[usize; 2]; 2]; 24] = [
     [[1,2], [9,21]], // 0
     [[0,2], [4,7]], // 1
     [[0,1], [14,23]], // 2
@@ -66,7 +66,7 @@ static MILLS_BY_SPACE : [[[usize; 2]; 2]; 24] = [
     [[18,19], [5,13]], // 20
     [[22,23], [0,9]], // 21
     [[21,23], [16,19]], // 22
-    [[21,22], [2,14]]
+    [[21,22], [2,14]] // 23
 ];
 
 static ADJACENT_SPACES : [&'static [usize]; 24] = [
@@ -77,7 +77,7 @@ static ADJACENT_SPACES : [&'static [usize]; 24] = [
     &[1,3,5,7], // 4
     &[4,13], // 5
     &[7,11], // 6
-    &[4,7,8], // 7
+    &[4,6,8], // 7
     &[7,12], // 8
     &[0,10,21], // 9
     &[3,9,11,18], // 10
@@ -144,7 +144,7 @@ impl Game for NineMensMorris {
             if yours <= 2 { Some(1.0) }
             else if mine <= 2 { Some(0.0) }
             else if mine > 3 && no_adjacent_moves() { Some(0.0) }
-            else if self.history.contains(self.board.iter()) { Some(0.0) }
+            else if self.history.contains(self.board.iter()) { Some(0.5) }
             else { None }
         }
     }
@@ -203,4 +203,18 @@ impl Game for NineMensMorris {
     }
     fn parse_move(string: &str) -> Option<Move> { string.split(';').last().and_then(|s| s.parse().ok()) }
     fn print_move(mv: &Move) { print!("{}", mv) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_spaces_in_seen_by_four() {
+        let mut counts = vec![0; 24];
+        for &x in MILLS_BY_SPACE.iter().flat_map(|ms| ms.iter()).flat_map(|m| m.iter()) {
+            counts[x] += 1;
+        }
+        assert_eq!(&[4; 24][..], &counts[..]);
+    }
 }
