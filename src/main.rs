@@ -22,6 +22,7 @@ mod basics;
 mod go;
 mod tictactoe;
 mod ninemensmorris;
+mod ggp;
 
 use game::Game;
 use tictactoe::TicTacToe;
