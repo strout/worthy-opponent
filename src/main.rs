@@ -232,11 +232,14 @@ fn parse_client_server_command(string: &str) -> Option<ClientServerCmd> {
 
 fn main() {
     use std::net::TcpStream;
-    let stream = TcpStream::connect(std::env::args().nth(2).as_ref().map(|x| x as &str).unwrap_or("127.0.0.1:11873")).unwrap();
+    let args = std::env::args().take(3).collect::<Vec<_>>();
+    let supplied_server = args.get(2);
+    let server_addr = supplied_server.map(|x| x as &str).unwrap_or("127.0.0.1:11873");
+    let stream = TcpStream::connect(server_addr).expect(&format!("Couldn't connect to {}", server_addr));
     let mut input = BufReader::new(stream.try_clone().unwrap());
     let mut output = stream;
     let mut buf = vec![];
-    output.write_fmt(format_args!("bot:{}\0", std::env::args().nth(1).unwrap())).unwrap();
+    output.write_fmt(format_args!("bot:{}\0", args.get(1).expect(&format!("Usage: {} name [server:port]", args[0])))).unwrap();
     input.read_until(0, &mut buf).unwrap();
     loop {
         buf.clear();
