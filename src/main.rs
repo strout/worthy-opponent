@@ -235,9 +235,8 @@ fn main() {
     let mut input = BufReader::new(stream.try_clone().unwrap());
     let mut output = stream;
     let mut buf = vec![];
-    output.write(b"bot:worthy-opponent\0").unwrap();
+    output.write_fmt(format_args!("bot:{}\0", std::env::args().nth(1).unwrap())).unwrap();
     input.read_until(0, &mut buf).unwrap();
-    assert_eq!(b"bot:worthy-opponent\0", &buf[..]);
     loop {
         buf.clear();
         input.read_until(0, &mut buf).unwrap();
