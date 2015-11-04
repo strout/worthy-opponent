@@ -157,6 +157,7 @@ fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>) {
                 g = G::init()
             }
             Ok(Cmd::Move(mv)) => {
+                print_mc(&mc);
                 mc = mc.next(&mv);
                 g.play(&mv);
                 g.print();
@@ -168,7 +169,6 @@ fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>) {
                 } else {
                     random_move(&mut rng, &g)
                 };
-                print_mc(&mc);
                 mvs.send(mv).unwrap();
                 if g.payoff().is_some() { return }
             }
