@@ -151,7 +151,7 @@ fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>) {
     loop {
         match cmds.try_recv() {
             Err(TryRecvError::Empty) => {},
-            Err(TryRecvError::Disconnected) => return,
+            Err(TryRecvError::Disconnected) => break,
             Ok(Cmd::Reset) => {
                 mc = MCTree::new(0);
                 g = G::init()
@@ -161,7 +161,7 @@ fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>) {
                 mc = mc.next(&mv);
                 g.play(&mv);
                 g.print();
-                if g.payoff().is_some() { return }
+                if g.payoff().is_some() { break }
             }
             Ok(Cmd::Gen) => {
                 let mv = if mc.replies.is_some() {
@@ -170,7 +170,6 @@ fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>) {
                     random_move(&mut rng, &g)
                 };
                 mvs.send(mv).unwrap();
-                if g.payoff().is_some() { return }
             }
         }
         mc_iteration(&mut rng, &mut g.clone(), &mut mc);
