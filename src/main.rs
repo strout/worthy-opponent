@@ -54,12 +54,11 @@ fn mc_score<M>(mc: &MCTree<M>, lnt: f64, explore: f64) -> f64 {
     }
 }
 
-fn print_mc<M>(mc: &MCTree<M>) where M: Display {
-    let lnt = (mc.plays as f64).ln();
-    let explore = 2.0;
+fn print_mc<M>(mc: &MCTree<M>, chosen: Option<&M>) where M: Display + PartialEq {
     if let Some(ref rs) = mc.replies {
+        let max_plays : usize = rs.iter().fold(0, |max, &(_, MCTree { plays, .. })| std::cmp::max(max, plays));
         for &(ref m, ref r) in rs.iter() {
-            println!("{} => {:.5} / {:.5} / {}", m, r.wins / r.plays as f64, mc_score(r, lnt, explore), r.plays)
+            println!("{} => {:.5} / {} {}{}", m, r.wins / r.plays as f64, r.plays, if r.plays == max_plays { "*" } else { "" }, if chosen.map(|c| m == c).unwrap_or(false) { "+" } else { "" })
         }
     }
     println!("");
@@ -158,7 +157,7 @@ fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>) {
                 g = G::init()
             }
             Ok(Cmd::Move(mv)) => {
-                print_mc(&mc);
+                print_mc(&mc, Some(&mv));
                 mc = mc.next(&mv);
                 g.play(&mv);
                 g.print();
@@ -200,7 +199,7 @@ fn run<'a, G: Game, R: BufRead, W: Write>(think_ms: u32, input: &mut R, output: 
         sendcmd.send(cmd).unwrap();
         if is_gen {
             let mv = recvmv.recv().unwrap();
-            output.write_fmt(format_args!("move {}\0", mv)).unwrap();
+            write!(output, "move {}\0", mv).unwrap();
         } else {
             output.write(b"ready\0").unwrap();
         }
@@ -239,7 +238,7 @@ fn main() {
     let mut input = BufReader::new(stream.try_clone().unwrap());
     let mut output = stream;
     let mut buf = vec![];
-    output.write_fmt(format_args!("bot:{}\0", args.get(1).expect(&format!("Usage: {} name [server:port]", args[0])))).unwrap();
+    write!(&mut output, "bot:{}\0", args.get(1).expect(&format!("Usage: {} name [server:port]", args[0]))).unwrap();
     input.read_until(0, &mut buf).unwrap();
     loop {
         buf.clear();
