@@ -20,7 +20,7 @@ pub enum Expr {
 #[derive(Clone)]
 pub struct Fact {
     cons: Expr,
-    pred: Box<[Expr]>,
+    pos: Box<[Expr]>,
     neg: Box<[Expr]>
 }
 
@@ -82,8 +82,8 @@ impl DB {
         self.facts.push(f)
     }
     fn query_inner<'a>(&'a self, expr: &'a Expr, asg: Assignments) -> Box<Iterator<Item=Assignments> + 'a> {
-        Box::new(self.facts.iter().flat_map(move |&Fact { ref cons, ref pred, ref neg }| {
-            let pos = pred.iter().fold(Box::new(asg.unify(expr, cons).into_iter()) as Box<Iterator<Item=Assignments> + 'a>, move |asgs, p| Box::new(asgs.flat_map(move |asg| self.query_inner(p, asg))));
+        Box::new(self.facts.iter().flat_map(move |&Fact { ref cons, ref pos, ref neg }| {
+            let pos = pos.iter().fold(Box::new(asg.unify(expr, cons).into_iter()) as Box<Iterator<Item=Assignments> + 'a>, move |asgs, p| Box::new(asgs.flat_map(move |asg| self.query_inner(p, asg))));
             neg.iter().fold(pos, move |asgs, n| Box::new(asgs.filter(move |asg| self.query_inner(n, asg.clone()).next().is_none())))
         }))
     }
@@ -97,7 +97,7 @@ mod tests {
     fn atoms() {
         let mut db = DB::new();
         let truth = Expr::Atom("truth".to_string());
-        db.add(Fact { cons: truth.clone(), pred: Box::new([]), neg: Box::new([]) });
+        db.add(Fact { cons: truth.clone(), pos: Box::new([]), neg: Box::new([]) });
         assert!(db.check(&truth));
         assert!(!db.check(&Expr::Atom("falsity".to_string())));
     }
@@ -106,7 +106,7 @@ mod tests {
     fn vars() {
         let mut db = DB::new();
         assert!(!db.check(&Expr::Var("X".to_string())));
-        db.add(Fact { cons: Expr::Atom("truth".to_string()), pred: Box::new([]), neg: Box::new([]) });
+        db.add(Fact { cons: Expr::Atom("truth".to_string()), pos: Box::new([]), neg: Box::new([]) });
         assert!(db.check(&Expr::Var("X".to_string())));
     }
 
@@ -117,8 +117,8 @@ mod tests {
         let thing_atom = Expr::Pred("thing".to_string(), Box::new([Expr::Atom("socrates".to_string())]));
         let thing_var = Expr::Pred("thing".to_string(), Box::new([Expr::Var("X".to_string())]));
         let mut db = DB::new();
-        db.add(Fact { pred: Box::new([]), cons: Expr::Pred("man".to_string(), Box::new([Expr::Atom("socrates".to_string())])), neg: Box::new([]) }); // man(socrates)
-        db.add(Fact { pred: Box::new([]), cons: Expr::Pred("thing".to_string(), Box::new([Expr::Var("X".to_string())])), neg: Box::new([]) }); // thing(Y)
+        db.add(Fact { pos: Box::new([]), cons: Expr::Pred("man".to_string(), Box::new([Expr::Atom("socrates".to_string())])), neg: Box::new([]) }); // man(socrates)
+        db.add(Fact { pos: Box::new([]), cons: Expr::Pred("thing".to_string(), Box::new([Expr::Var("X".to_string())])), neg: Box::new([]) }); // thing(Y)
         assert_eq!(1, db.query(&man_atom).count()); // man(socrates)?
         assert_eq!(1, db.query(&man_var).count()); // man(X)?
         assert_eq!(1, db.query(&thing_atom).count()); // thing(socrates)?
@@ -129,6 +129,6 @@ mod tests {
     fn tic_tac_toe() {
         let roles = [Expr::Pred("role".to_string(), Box::new([Expr::Atom("x".to_string())])), Expr::Pred("role".to_string(), Box::new([Expr::Atom("x".to_string())]))];
         let mut db = DB::new();
-        for r in roles.into_iter().cloned() { db.add(Fact { cons: r, pred: Box::new([]), neg: Box::new([]) }) }
+        for r in roles.into_iter().cloned() { db.add(Fact { cons: r, pos: Box::new([]), neg: Box::new([]) }) }
     }
 }
