@@ -87,6 +87,22 @@ pub struct Fact {
 
 impl Assignments {
     fn new() -> Assignments { Assignments { vars: HashMap::new(), vals: vec![] } }
+    fn fresh(&self, expr: &Expr, names: &mut HashMap<String, String>) -> Expr {
+        match expr {
+            &Atom(ref x) => Atom(x.clone()),
+            &Var(ref x) => Var(if names.contains_key(x) {
+                names[x].clone()
+            } else {
+                let mut nm = x.clone();
+                while self.vars.contains_key(x) || names.contains_key(x) || names.values().any(|v| v == &nm) {
+                    nm.push('*');
+                }
+                names.insert(x.clone(), nm.clone());
+                nm
+            }),
+            &Pred(ref name, ref args) => Pred(name.clone(), args.iter().map(|arg| self.fresh(arg, names)).collect::<Vec<_>>().into_boxed_slice())
+        }
+    }
     fn get_val(&self, base: &V) -> V {
         match base {
             &V::Var(mut i) => {
@@ -100,17 +116,18 @@ impl Assignments {
             _ => base.clone()
         }
     }
-    fn to_val(&mut self, expr: &Expr) -> V {
+    fn to_val(&mut self, expr: &Expr, suf: Option<usize>) -> V {
         match expr {
             &Atom(ref x) => V::Atom(x.clone()),
             &Var(ref x) => {
                 let vals = &mut self.vals;
-                V::Var(*self.vars.entry(x.clone()).or_insert_with(|| { let i = vals.len(); vals.push(V::Var(i)); i }))
+                let x = match suf { Some(n) => format!("{}${}", x, n), None => x.clone() };
+                V::Var(*self.vars.entry(x).or_insert_with(|| { let i = vals.len(); vals.push(V::Var(i)); i }))
             },
             &Pred(ref name, ref args) => {
                 let mut v_args = Vec::with_capacity(args.len());
                 for arg in args.iter() {
-                    v_args.push(self.to_val(arg));
+                    v_args.push(self.to_val(arg, suf));
                 }
                 V::Pred(name.clone(), v_args.into_boxed_slice())
             }
@@ -119,20 +136,27 @@ impl Assignments {
     fn from_val(&self, val: &V) -> Expr {
         match self.get_val(val) {
             V::Atom(x) => Atom(x),
-            V::Var(i) => Var(i.to_string()),
+            V::Var(i) => Var(format!("?{}", i)),
             V::Pred(name, args) => Pred(name, args.iter().map(|arg| self.from_val(arg)).collect::<Vec<_>>().into_boxed_slice())
         }
     }
-    fn unify(mut self, left: &Expr, right: &Expr) -> Option<Assignments> {
-        let l_val = self.to_val(left);
-        let r_val = self.to_val(right);
-        if self.unify_val(&l_val, &r_val) { Some(self) } else { None }
+    fn unify(mut self, left: &Expr, l_depth: Option<usize>, right: &Expr, r_depth: Option<usize>) -> Option<Assignments> {
+        let l_val = self.to_val(left, l_depth);
+        let r_val = self.to_val(right, r_depth);
+        print!("{} ?= {} -- ", self.from_val(&l_val), self.from_val(&r_val));
+        if self.unify_val(&l_val, &r_val) {
+            println!("OK: {} == {} when {}", self.from_val(&l_val), self.from_val(&r_val), self);
+            Some(self)
+        } else {
+            println!("NO: {} != {} when {}", self.from_val(&l_val), self.from_val(&r_val), self);
+            None
+        }
     }
     fn unify_val(&mut self, left: &V, right: &V) -> bool {
         match (self.get_val(left), self.get_val(right)) {
            (V::Atom(x), V::Atom(y)) => x == y,
            (V::Pred(l_name, l_args), V::Pred(r_name, r_args)) => l_name == r_name && l_args.iter().zip(r_args.iter()).all(|(l, r)| self.unify_val(l, r)),
-           (V::Var(i), V::Var(j)) => if i == j { true } else { false },
+           (V::Var(i), V::Var(j)) => { if i != j { self.vals[i] = V::Var(j) }; true },
            (V::Var(i), x) | (x, V::Var(i)) => { self.vals[i] = x; true },
            (V::Atom(_), V::Pred(_, _)) | (V::Pred(_, _), V::Atom(_)) => false
         }
@@ -142,10 +166,39 @@ impl Assignments {
 #[derive(Clone)]
 pub struct DB { facts: Vec<Fact> }
 
+impl Display for DB {
+    fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
+        for &Fact { ref cons, ref pos, ref neg, ref distinct } in self.facts.iter() {
+            try!(write!(fmt, "{}", cons));
+            if !pos.is_empty() || !neg.is_empty() || !distinct.is_empty() {
+                try!(write!(fmt, " :- "));
+            }
+            let mut first = true;
+            for p in pos.iter() {
+                if !first { try!(write!(fmt, " & ")) }
+                first = false;
+                try!(write!(fmt, "{}", p));
+            }
+            for n in neg.iter() {
+                if !first { try!(write!(fmt, " & ")) }
+                first = false;
+                try!(write!(fmt, "~{}", n));
+            }
+            for &(ref l, ref r) in distinct.iter() {
+                if !first { try!(write!(fmt, " & ")) }
+                first = false;
+                try!(write!(fmt, "distinct({}, {})", l, r));
+            }
+            try!(writeln!(fmt, ""))
+        }
+        Ok(())
+    }
+}
+
 impl DB {
     pub fn new() -> DB { DB { facts: vec![] } }
     pub fn query<'a>(&'a self, expr: &'a Expr) -> Box<Iterator<Item=Expr> + 'a> {
-        Box::new(self.query_inner(expr, Assignments::new()).map(move |mut asg| { let val = asg.to_val(expr); asg.from_val(&val) }))
+        Box::new(self.query_inner(expr, Assignments::new(), None).map(move |mut asg| { let val = asg.to_val(expr, None); asg.from_val(&val) }))
     }
     pub fn check(&self, e: &Expr) -> bool {
         self.query(e).next().is_some()
@@ -153,11 +206,12 @@ impl DB {
     pub fn add(&mut self, f: Fact) {
         self.facts.push(f)
     }
-    fn query_inner<'a>(&'a self, expr: &'a Expr, asg: Assignments) -> Box<Iterator<Item=Assignments> + 'a> {
+    fn query_inner<'a>(&'a self, expr: &'a Expr, asg: Assignments, depth: Option<usize>) -> Box<Iterator<Item=Assignments> + 'a> {
         Box::new(self.facts.iter().flat_map(move |&Fact { ref cons, ref pos, ref neg, ref distinct }| {
-            let pos = pos.iter().fold(Box::new(asg.clone().unify(expr, cons).into_iter()) as Box<Iterator<Item=Assignments> + 'a>, move |asgs, p| Box::new(asgs.flat_map(move |asg| self.query_inner(p, asg))));
-            let neg = neg.iter().fold(pos, move |asgs, n| Box::new(asgs.filter(move |asg| self.query_inner(n, asg.clone()).next().is_none())));
-            distinct.iter().fold(neg, move |asgs, &(ref l, ref r)| Box::new(asgs.filter(move |asg| asg.clone().unify(l, r).is_none())))
+            let r_depth = Some(asg.vars.len());
+            let pos = pos.iter().fold(Box::new(asg.clone().unify(expr, depth, &cons, r_depth).into_iter()) as Box<Iterator<Item=Assignments> + 'a>, move |asgs, p| Box::new(asgs.flat_map(move |asg| self.query_inner(p, asg, r_depth))));
+            let neg = neg.iter().fold(pos, move |asgs, n| Box::new(asgs.filter(move |asg| self.query_inner(n, asg.clone(), r_depth).next().is_none())));
+            distinct.iter().fold(neg, move |asgs, &(ref l, ref r)| Box::new(asgs.filter(move |asg| asg.clone().unify(l, r_depth, r, r_depth).is_none())))
         }))
     }
 }
@@ -212,7 +266,7 @@ mod tests {
         let roles = ["x", "o"];
         for r in roles.iter() { db.add(fact(pred("role", vec![atom(r)]), vec![], vec![], vec![])) }
         
-        for r in roles.iter() { db.add(fact(pred("input", vec![atom(r), pred("mark", vec![var("M"), var("N")])]), vec![pred("role", vec![var("R")]), pred("index", vec![var("M")]), pred("index", vec![var("N")])], vec![], vec![])) }
+        db.add(fact(pred("input", vec![var("R"), pred("mark", vec![var("M"), var("N")])]), vec![pred("role", vec![var("R")]), pred("index", vec![var("M")]), pred("index", vec![var("N")])], vec![], vec![]));
         db.add(fact(pred("input", vec![var("R"), atom("noop")]), vec![pred("role", vec![var("R")])], vec![], vec![]));
 
         for i in 1..4 { db.add(fact(pred("index", vec![Atom(i.to_string())]), vec![], vec![], vec![])) }
@@ -295,10 +349,10 @@ mod tests {
         db.add(fact(pred("column", vec![var("M"), var("X")]),
             (1..4).map(|i| pred("true", vec![pred("cell", vec![Atom(i.to_string()), var("M"), var("X")])])).collect(),
             vec![], vec![]));
-        db.add(fact(pred("diagonal", vec![var("M"), var("X")]),
+        db.add(fact(pred("diagonal", vec![var("X")]),
             (1..4).map(|i| pred("true", vec![pred("cell", vec![Atom(i.to_string()), Atom(i.to_string()), var("X")])])).collect(),
             vec![], vec![]));
-        db.add(fact(pred("diagonal", vec![var("M"), var("X")]),
+        db.add(fact(pred("diagonal", vec![var("X")]),
             (1..4).map(|i| pred("true", vec![pred("cell", vec![Atom(i.to_string()), Atom((4-i).to_string()), var("X")])])).collect(),
             vec![], vec![]));
 
@@ -320,6 +374,25 @@ mod tests {
         let init = db.query(&init_query).collect::<Vec<_>>();
         assert_eq!(10, init.len());
 
-        // TODO build "true" from "init", then check the legal/next/etc.
+        for expr in init.iter() {
+            println!("adding as truth: {}", expr);
+            if let &Pred(_, ref args) = expr {
+                db.add(fact(pred("true", args.iter().cloned().collect()), vec![], vec![], vec![]));
+            } else { unreachable!() }
+        }
+
+        let goal_query = pred("goal", vec![var("R"), var("X")]);
+        assert_eq!(2, db.query(&goal_query).count());
+
+        let legal_query = pred("legal", vec![var("R"), var("X")]);
+        let legal = db.query(&legal_query).collect::<Vec<_>>();
+        for l in legal.iter() { println!("{}", l) }
+        assert_eq!(10, legal.len());
+
+        db.add(fact(pred("does", vec![atom("x"), pred("mark", vec![atom("1"), atom("1")])]), vec![], vec![], vec![]));
+        db.add(fact(pred("does", vec![atom("o"), atom("noop")]), vec![], vec![], vec![]));
+
+        // let next_query = pred("next", vec![var("X")]);
+        // assert_eq!(10, db.query(&next_query).count()); // This would pass if results had no duplicates. (Should they?)
     }
 }
