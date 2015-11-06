@@ -87,22 +87,6 @@ pub struct Fact {
 
 impl Assignments {
     fn new() -> Assignments { Assignments { vars: HashMap::new(), vals: vec![] } }
-    fn fresh(&self, expr: &Expr, names: &mut HashMap<String, String>) -> Expr {
-        match expr {
-            &Atom(ref x) => Atom(x.clone()),
-            &Var(ref x) => Var(if names.contains_key(x) {
-                names[x].clone()
-            } else {
-                let mut nm = x.clone();
-                while self.vars.contains_key(x) || names.contains_key(x) || names.values().any(|v| v == &nm) {
-                    nm.push('*');
-                }
-                names.insert(x.clone(), nm.clone());
-                nm
-            }),
-            &Pred(ref name, ref args) => Pred(name.clone(), args.iter().map(|arg| self.fresh(arg, names)).collect::<Vec<_>>().into_boxed_slice())
-        }
-    }
     fn get_val(&self, base: &V) -> V {
         match base {
             &V::Var(mut i) => {
