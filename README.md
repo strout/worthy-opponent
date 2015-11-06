@@ -4,7 +4,7 @@
 
 ## Games
 
-Currently three games are implemented: [Tic-tac-toe](https://en.wikipedia.org/wiki/Tic-tac-toe), [Nine Men's Morris](https://en.wikipedia.org/wiki/Nine_Men%27s_Morris), and [Go](https://en.wikipedia.org/wiki/Go_(game)).
+Currently three games are implemented: [Tic-tac-toe](https://en.wikipedia.org/wiki/Tic-tac-toe), [Nine Men's Morris](https://en.wikipedia.org/wiki/Nine_Men%27s_Morris), and [Go](https://en.wikipedia.org/wiki/Go_(game)). Soon it will play [Connect Four](https://en.wikipedia.org/wiki/Connect_Four) and [every other game ever](https://en.wikipedia.org/wiki/General_game_playing).
 
 ## How it works
 
