@@ -143,12 +143,9 @@ impl Assignments {
     fn unify(mut self, left: &Expr, l_depth: Option<usize>, right: &Expr, r_depth: Option<usize>) -> Option<Assignments> {
         let l_val = self.to_val(left, l_depth);
         let r_val = self.to_val(right, r_depth);
-        print!("{} ?= {} -- ", self.from_val(&l_val), self.from_val(&r_val));
         if self.unify_val(&l_val, &r_val) {
-            println!("OK: {} == {} when {}", self.from_val(&l_val), self.from_val(&r_val), self);
             Some(self)
         } else {
-            println!("NO: {} != {} when {}", self.from_val(&l_val), self.from_val(&r_val), self);
             None
         }
     }
@@ -375,7 +372,6 @@ mod tests {
         assert_eq!(10, init.len());
 
         for expr in init.iter() {
-            println!("adding as truth: {}", expr);
             if let &Pred(_, ref args) = expr {
                 db.add(fact(pred("true", args.iter().cloned().collect()), vec![], vec![], vec![]));
             } else { unreachable!() }
@@ -386,7 +382,6 @@ mod tests {
 
         let legal_query = pred("legal", vec![var("R"), var("X")]);
         let legal = db.query(&legal_query).collect::<Vec<_>>();
-        for l in legal.iter() { println!("{}", l) }
         assert_eq!(10, legal.len());
 
         db.add(fact(pred("does", vec![atom("x"), pred("mark", vec![atom("1"), atom("1")])]), vec![], vec![], vec![]));

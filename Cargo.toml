@@ -7,6 +7,9 @@ authors = ["Steve Trout <steve.trout@gmail.com>"]
 debug = true
 lto = true
 
+[profile.bench]
+debug = true
+
 [dependencies]
 rand = "*"
 bit-set = "*"
