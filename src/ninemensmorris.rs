@@ -69,7 +69,7 @@ pub static MILLS_BY_SPACE : [[[usize; 2]; 2]; 24] = [
     [[21,22], [2,14]] // 23
 ];
 
-static ADJACENT_SPACES : [&'static [usize]; 24] = [
+pub static ADJACENT_SPACES : [&'static [usize]; 24] = [
     &[1,9], // 0
     &[0,2,4], // 1
     &[1,14], // 2
@@ -124,6 +124,38 @@ impl NineMensMorris {
         for (i, x) in self.board.iter().enumerate() { if x.is_filled() { ret.remove(&i); } };
         ret
     }
+    fn moves(&self, c: Space) -> Vec<Move> {
+        let mut ret = vec![];
+        if self.turn < 18 {
+           for d in self.board.iter().enumerate().filter_map(|(i, x)| if x.is_empty() { Some(i) } else { None }) {
+               if self.forms_mill(d) {
+                   for r in self.removable_pieces().iter() {
+                       ret.push(Move { from: None, to: d, remove: Some(r) });
+                   }
+               } else {
+                   ret.push(Move { from: None, to: d, remove: None });
+               }
+           }
+        } else {
+           for s in self.board.iter().enumerate().filter_map(|(i, &x)| if x == c { Some(i) } else { None }) {
+               for d in if self.pieces_for(c) == 3 { self.board.iter().enumerate().filter_map(|(i, x)| if x.is_empty() { Some(i) } else { None }).collect() } else { self.adjacent_free(s) }.into_iter() {
+                   if self.forms_mill_without(d, s) {
+                       for r in self.removable_pieces().iter() {
+                           ret.push(Move { from: Some(s), to: d, remove: Some(r) });
+                       }
+                   } else {
+                       ret.push(Move { from: Some(s), to: d, remove: None });
+                   }
+               }
+           }
+        }
+        ret
+    }
+    fn pieces_for(&self, c: Space) -> usize { match c { Black => self.black_pieces, White => self.white_pieces, Empty => panic!("Bad argument.") } }
+    fn weigh_move(&self, m: &Move) -> u32 {
+        if let &Move { remove: Some(_), .. } = m { return 10 }
+        1
+    }
 }
 
 impl Game for NineMensMorris {
@@ -136,12 +168,12 @@ impl Game for NineMensMorris {
             None
         } else {
             let c = self.current_player();
-            let (mine, yours) = if c == Black { (self.black_pieces, self.white_pieces) } else { (self.white_pieces, self.black_pieces) };
+            let mine = self.pieces_for(c);
             let no_adjacent_moves = || {
                 let mut my_pieces = self.board.iter().enumerate().filter_map(|(i, &x)| if x == c { Some(i) } else { None });
                 my_pieces.all(|s| ADJACENT_SPACES[s].iter().all(|&x| self.board[x].is_filled()))
             };
-            if yours <= 2 { Some(1.0) }
+            if self.pieces_for(c.enemy()) <= 2 { Some(1.0) }
             else if mine <= 2 { Some(0.0) }
             else if mine > 3 && no_adjacent_moves() { Some(0.0) }
             else if self.history.contains(self.board.iter()) { Some(0.5) }
@@ -149,32 +181,7 @@ impl Game for NineMensMorris {
         }
     }
     fn legal_moves(&self) -> Vec<Weighted<Move>> {
-        let mut ret = vec![];
-        if self.turn < 18 {
-           for d in self.board.iter().enumerate().filter_map(|(i, x)| if x.is_empty() { Some(i) } else { None }) {
-               if self.forms_mill(d) {
-                   for r in self.removable_pieces().iter() {
-                       ret.push(Weighted { weight: 2, item: Move { from: None, to: d, remove: Some(r) } });
-                   }
-               } else {
-                   ret.push(Weighted { weight: 1, item: Move { from: None, to: d, remove: None } });
-               }
-           }
-        } else {
-           let c = self.current_player();
-           for s in self.board.iter().enumerate().filter_map(|(i, &x)| if x == c { Some(i) } else { None }) {
-               for d in if (c == Black && self.black_pieces == 3) || self.white_pieces == 3 { self.board.iter().enumerate().filter_map(|(i, x)| if x.is_empty() { Some(i) } else { None }).collect() } else { self.adjacent_free(s) }.into_iter() {
-                   if self.forms_mill_without(d, s) {
-                       for r in self.removable_pieces().iter() {
-                           ret.push(Weighted { weight: 2, item: Move { from: Some(s), to: d, remove: Some(r) } });
-                       }
-                   } else {
-                       ret.push(Weighted { weight: 1, item: Move { from: Some(s), to: d, remove: None } });
-                   }
-               }
-           }
-        }
-        ret
+        self.moves(self.current_player()).into_iter().map(|m| Weighted { weight: self.weigh_move(&m), item: m }).collect()
     }
     fn play(&mut self, &Move { from, to, remove }: &Move) {
         let mut removed = 0;
@@ -216,5 +223,14 @@ mod tests {
             counts[x] += 1;
         }
         assert_eq!(&[4; 24][..], &counts[..]);
+    }
+
+    #[test]
+    fn adjacency_is_mutual() {
+        for (x, adj) in ADJACENT_SPACES.iter().enumerate() {
+            for &y in adj.iter() {
+                assert!(ADJACENT_SPACES[y].contains(&x))
+            }
+        }
     }
 }
