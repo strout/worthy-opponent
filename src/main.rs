@@ -161,7 +161,6 @@ fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>) {
                 mc = mc.next(&mv);
                 g.play(&mv);
                 g.print();
-                if g.payoff().is_some() { break }
             }
             Ok(Cmd::Gen) => {
                 let mv = if mc.replies.is_some() {
