@@ -21,11 +21,13 @@ mod game;
 mod basics;
 mod go;
 mod tictactoe;
+mod connectfour;
 mod ninemensmorris;
 mod ggp;
 
 use game::Game;
 use tictactoe::TicTacToe;
+use connectfour::ConnectFour;
 use ninemensmorris::NineMensMorris;
 use go::Go;
 
@@ -226,7 +228,6 @@ fn parse_client_server_command(string: &str) -> Option<ClientServerCmd> {
         Some(ClientServerCmd { name: name, args: acc })
     })
 }
-
 fn main() {
     use std::net::TcpStream;
     let args = std::env::args().take(3).collect::<Vec<_>>();
@@ -248,6 +249,7 @@ fn main() {
                 output.write(b"ready\0").unwrap();
                 match cmd.args["game"] {
                     "tictactoe" => run::<TicTacToe,_,_>(think_ms, &mut input, &mut output),
+                    "connectfour" => run::<ConnectFour,_,_>(think_ms, &mut input, &mut output),
                     "ninemensmorris" => run::<NineMensMorris,_,_>(think_ms, &mut input, &mut output),
                     "go" => run::<Go,_,_>(think_ms, &mut input, &mut output),
                     x => panic!("I don't know how to play {}.", x)
@@ -267,6 +269,7 @@ mod tests {
     use go::Go;
     use ninemensmorris::NineMensMorris;
     use tictactoe::TicTacToe;
+    use connectfour::ConnectFour;
 
     fn bench_mc_iteration<G: Game>(bench: &mut Bencher) {
         let mut mc = MCTree::new(0);
@@ -288,5 +291,10 @@ mod tests {
     #[bench]
     fn tictactoe(bench: &mut Bencher) {
         bench_mc_iteration::<TicTacToe>(bench)
+    }
+
+    #[bench]
+    fn connectfour(bench: &mut Bencher) {
+        bench_mc_iteration::<ConnectFour>(bench)
     }
 }
