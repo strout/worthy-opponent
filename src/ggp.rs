@@ -171,17 +171,17 @@ impl Assignments {
 }
 
 #[derive(Clone)]
-pub struct DB { facts: Vec<Fact> }
+pub struct DB { facts: HashMap<String, Vec<Fact>> }
 
 impl Display for DB {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
-        for f in self.facts.iter() { try!(writeln!(fmt, "{}", f)) }
+        for f in self.facts.values().flat_map(|x| x.iter()) { try!(writeln!(fmt, "{}", f)) }
         Ok(())
     }
 }
 
 impl DB {
-    pub fn new() -> DB { DB { facts: vec![] } }
+    pub fn new() -> DB { DB { facts: HashMap::new() } }
     pub fn query<'a>(&'a self, expr: &'a Expr) -> Box<Iterator<Item=Expr> + 'a> {
         Box::new(self.query_inner(expr, Assignments::new(), None).map(move |mut asg| { let val = asg.to_val(expr, None); asg.from_val(&val) }))
     }
@@ -189,10 +189,18 @@ impl DB {
         self.query(e).next().is_some()
     }
     pub fn add(&mut self, f: Fact) {
-        self.facts.push(f)
+        let e = match f.cons {
+            Atom(ref n) | Pred(ref n, _) => self.facts.entry(n.clone()),
+            Var(_) => panic!("Can't add a variable as a fact.")
+        };
+        e.or_insert(vec![]).push(f)
     }
     fn query_inner<'a>(&'a self, expr: &'a Expr, asg: Assignments, depth: Option<usize>) -> Box<Iterator<Item=Assignments> + 'a> {
-        Box::new(self.facts.iter().flat_map(move |&Fact { ref cons, ref pos, ref neg, ref distinct }| {
+        let relevant : Box<Iterator<Item=&'a Vec<Fact>> + 'a> = match expr {
+            &Var(_) => Box::new(self.facts.values()),
+            &Atom(ref n) | &Pred(ref n, _) => Box::new(self.facts.get(n).into_iter())
+        };
+        Box::new(relevant.flat_map(|x| x.iter()).flat_map(move |&Fact { ref cons, ref pos, ref neg, ref distinct }| {
             let r_depth = Some(asg.vars.len());
             let pos = pos.iter().fold(Box::new(asg.clone().unify(expr, depth, &cons, r_depth).into_iter()) as Box<Iterator<Item=Assignments> + 'a>, move |asgs, p| Box::new(asgs.flat_map(move |asg| self.query_inner(p, asg, r_depth))));
             let neg = neg.iter().fold(pos, move |asgs, n| Box::new(asgs.filter(move |asg| self.query_inner(n, asg.clone(), r_depth).next().is_none())));
