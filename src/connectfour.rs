@@ -100,7 +100,7 @@ impl ConnectFour {
         }
         Empty
     }
-    fn weight_for(&self, x: usize) -> u32 {
+    fn weight_for(&self, _: usize) -> u32 {
         1
     }
     fn current_player(&self) -> Space {

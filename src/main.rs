@@ -228,6 +228,7 @@ fn parse_client_server_command(string: &str) -> Option<ClientServerCmd> {
         Some(ClientServerCmd { name: name, args: acc })
     })
 }
+
 fn main() {
     use std::net::TcpStream;
     let args = std::env::args().take(3).collect::<Vec<_>>();

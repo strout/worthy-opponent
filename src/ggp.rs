@@ -6,6 +6,7 @@ use std::fmt::{Display, Formatter, Error};
 use std::result::Result;
 use self::Expr::*;
 use self::{ValExpr as V};
+use std::mem::replace;
 
 #[derive(Clone, Debug)]
 struct Assignments {
@@ -26,7 +27,7 @@ impl Display for Assignments {
 }
 
 #[derive(Clone, Debug)]
-pub enum ValExpr {
+enum ValExpr {
     Atom(String),
     Var(usize),
     Pred(String, Box<[ValExpr]>)
@@ -85,6 +86,31 @@ pub struct Fact {
     distinct: Box<[(Expr, Expr)]>
 }
 
+impl Display for Fact {
+    fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
+        try!(write!(fmt, "{}", self.cons));
+        if !self.pos.is_empty() || !self.neg.is_empty() || !self.distinct.is_empty() {
+            try!(write!(fmt, " :- "));
+        }
+        let mut first = true;
+        for p in self.pos.iter() {
+            if !first { try!(write!(fmt, " & ")) }
+            first = false;
+            try!(write!(fmt, "{}", p));
+        }
+        for n in self.neg.iter() {
+            if !first { try!(write!(fmt, " & ")) }
+            first = false;
+            try!(write!(fmt, "~{}", n));
+        }
+        for &(ref l, ref r) in self.distinct.iter() {
+            if !first { try!(write!(fmt, " & ")) }
+            first = false;
+            try!(write!(fmt, "distinct({}, {})", l, r));
+        }
+        Ok(())
+    }
+}
 impl Assignments {
     fn new() -> Assignments { Assignments { vars: HashMap::new(), vals: vec![] } }
     fn get_val(&self, base: &V) -> V {
@@ -149,29 +175,7 @@ pub struct DB { facts: Vec<Fact> }
 
 impl Display for DB {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
-        for &Fact { ref cons, ref pos, ref neg, ref distinct } in self.facts.iter() {
-            try!(write!(fmt, "{}", cons));
-            if !pos.is_empty() || !neg.is_empty() || !distinct.is_empty() {
-                try!(write!(fmt, " :- "));
-            }
-            let mut first = true;
-            for p in pos.iter() {
-                if !first { try!(write!(fmt, " & ")) }
-                first = false;
-                try!(write!(fmt, "{}", p));
-            }
-            for n in neg.iter() {
-                if !first { try!(write!(fmt, " & ")) }
-                first = false;
-                try!(write!(fmt, "~{}", n));
-            }
-            for &(ref l, ref r) in distinct.iter() {
-                if !first { try!(write!(fmt, " & ")) }
-                first = false;
-                try!(write!(fmt, "distinct({}, {})", l, r));
-            }
-            try!(writeln!(fmt, ""))
-        }
+        for f in self.facts.iter() { try!(writeln!(fmt, "{}", f)) }
         Ok(())
     }
 }
@@ -194,6 +198,37 @@ impl DB {
             let neg = neg.iter().fold(pos, move |asgs, n| Box::new(asgs.filter(move |asg| self.query_inner(n, asg.clone(), r_depth).next().is_none())));
             distinct.iter().fold(neg, move |asgs, &(ref l, ref r)| Box::new(asgs.filter(move |asg| asg.clone().unify(l, r_depth, r, r_depth).is_none())))
         }))
+    }
+}
+
+struct GGP {
+    base: DB,
+    cur: DB
+}
+
+impl GGP {
+    fn roles(&self) -> Vec<Expr> {
+        let query = Pred("role".into(), Box::new([Var("X".into())]));
+        let ret = self.cur.query(&query).map(|x| match x { Pred(_, args) => args[1].clone(), _ => unreachable!() }).collect();
+        ret
+    }
+    fn legal_moves_for(&self, r: &Expr) -> Vec<Expr> {
+        let query = Pred("legal".into(), Box::new([r.clone(), Var("X".into())]));
+        let ret = self.cur.query(&query).map(|x| match x { Pred(_, args) => args[1].clone(), _ => unreachable!() }).collect();
+        ret
+    }
+    fn play(&mut self, moves: &[(Expr, Expr)]) {
+        let mut db = replace(&mut self.cur, self.base.clone());
+        for &(ref r, ref m) in moves.iter() {
+            db.add(Fact { cons: Pred("does".into(), Box::new([r.clone(), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
+        }
+        let next_query = Pred("next".into(), Box::new([Var("X".into())]));
+        for next in db.query(&next_query) {
+            match next {
+                Pred(_, args) => self.cur.add(Fact { cons: Pred("true".into(), args.clone()), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }),
+                _ => unreachable!()
+            }
+        }
     }
 }
 
