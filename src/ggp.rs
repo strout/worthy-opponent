@@ -7,6 +7,8 @@ use std::result::Result;
 use self::Expr::*;
 use self::{ValExpr as V};
 use std::mem::replace;
+use game::Game;
+use rand::distributions::Weighted;
 
 #[derive(Clone, Debug)]
 struct Assignments {
@@ -52,7 +54,7 @@ impl Display for ValExpr {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Expr {
     Atom(String),
     Var(String),
@@ -209,6 +211,7 @@ impl DB {
     }
 }
 
+#[derive(Clone)]
 pub struct GGP {
     base: DB,
     cur: DB
@@ -229,7 +232,7 @@ impl GGP {
     pub fn roles(&self) -> Vec<String> {
         let query = Pred("role".into(), Box::new([Var("X".into())]));
         let ret = self.cur.query(&query).map(|x| match x {
-            Pred(_, args) => match &args[1] {
+            Pred(_, args) => match &args[0] {
                 &Atom(ref s) => s.clone(),
                 _ => unreachable!()
             },
@@ -271,15 +274,192 @@ impl GGP {
     }
 }
 
+#[derive(Clone)]
+pub struct GGPTicTacToe {
+    ggp: GGP
+}
+
+impl GGPTicTacToe {
+    fn current_player(&self) -> String {
+        let query = Pred("true".into(), Box::new([Pred("control".into(), Box::new([Var("X".into())]))]));
+        let ret = match self.ggp.cur.query(&query).next().unwrap() {
+            Pred(_, args) => match &args[0] {
+                &Pred(_, ref args) => match &args[0] {
+                    &Atom(ref r) => r.clone(),
+                    _ => unreachable!()
+                },
+                _ => unreachable!()
+            },
+            _ => unreachable!()
+        };
+        ret
+    }
+}
+
+impl Game for GGPTicTacToe {
+    type Move = usize;
+
+    fn init() -> GGPTicTacToe {
+        GGPTicTacToe { ggp: GGP::from_rules(set_up_tic_tac_toe()) }
+    }
+
+    fn legal_moves(&self) -> Vec<Weighted<usize>> {
+        let c = self.current_player();
+        let moves = self.ggp.legal_moves_for(&c);
+        moves.into_iter().map(|mv| match mv {
+            Pred(_, args) => match (&args[0], &args[1]) {
+                (&Atom(ref col), &Atom(ref row)) => Weighted { weight: 1, item: col.parse::<usize>().unwrap() + 3 * row.parse::<usize>().unwrap() },
+                _ => unreachable!()
+            },
+            _ => unreachable!()
+        }).collect()
+    }
+
+    fn payoff(&self) -> Option<f64> {
+        if !self.ggp.is_done() { return None }
+        Some(self.ggp.goals()[&self.current_player()] as f64 / 100.0)
+    }
+
+    fn play(&mut self, &x: &usize) {
+        let row = x / 3;
+        let col = x % 3;
+        let c = self.current_player();
+        let mvs = self.ggp.roles().into_iter().map(|r| if r == c {
+            (r, Pred("move".into(), Box::new([Atom(format!("{}", col)), Atom(format!("{}", row))])))
+        } else {
+            (r, Atom("noop".into()))
+        }).collect::<Vec<_>>();
+        self.ggp.play(&mvs[..]);
+    }
+
+    fn print(&self) {
+        let query = Pred("true".into(), Box::new([Var("X".into())]));
+        for x in self.ggp.cur.query(&query) {
+            println!("{}", x)
+        }
+    }
+
+    fn parse_move(string: &str) -> Option<usize> { string.as_bytes().last().map(|b| (b - b'0') as usize) }
+    fn print_move(mv: &usize) { print!("{}", mv) }
+}
+
+pub fn set_up_tic_tac_toe() -> DB {
+    // based on the example in http://games.stanford.edu/index.php/intro-to-gdl
+    let mut db = DB::new();
+
+    let roles = ["x", "o"];
+    for r in roles.iter() { db.add(fact(pred("role", vec![atom(r)]), vec![], vec![], vec![])) }
+    
+    db.add(fact(pred("input", vec![var("R"), pred("mark", vec![var("M"), var("N")])]), vec![pred("role", vec![var("R")]), pred("index", vec![var("M")]), pred("index", vec![var("N")])], vec![], vec![]));
+    db.add(fact(pred("input", vec![var("R"), atom("noop")]), vec![pred("role", vec![var("R")])], vec![], vec![]));
+
+    for i in 1..4 { db.add(fact(pred("index", vec![Atom(i.to_string())]), vec![], vec![], vec![])) }
+
+    for m in ["x", "o", "b"].iter() { db.add(fact(pred("base", vec![pred("cell", vec![var("M"), var("N"), atom(m)])]), vec![pred("index", vec![var("M")]), pred("index", vec![var("N")])], vec![], vec![])) }
+    for r in roles.iter() { db.add(fact(pred("base", vec![pred("control", vec![atom(r)])]), vec![], vec![], vec![])) }
+
+    for x in 1..4 { for y in 1..4 { db.add(fact(pred("init", vec![pred("cell", vec![Atom(x.to_string()), Atom(y.to_string()), atom("b")])]), vec![], vec![], vec![])) } }
+    db.add(fact(pred("init", vec![pred("control", vec![atom("x")])]), vec![], vec![], vec![]));
+
+    db.add(fact(pred("legal", vec![var("W"), pred("mark", vec![var("X"), var("Y")])]),
+        vec![pred("true", vec![pred("cell", vec![var("X"), var("Y"), atom("b")])]), pred("true", vec![pred("control", vec![var("W")])])],
+        vec![], vec![]));
+    db.add(fact(pred("legal", vec![atom("x"), atom("noop")]), vec![pred("true", vec![pred("control", vec![atom("o")])])], vec![], vec![]));
+    db.add(fact(pred("legal", vec![atom("o"), atom("noop")]), vec![pred("true", vec![pred("control", vec![atom("x")])])], vec![], vec![]));
+    
+    db.add(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), var("R")])]),
+        vec![pred("does", vec![var("R"), pred("mark", vec![var("M"), var("N")])]),
+            pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])],
+        vec![], vec![]));
+    db.add(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), var("W")])]),
+        vec![pred("true", vec![pred("cell", vec![var("M"), var("N"), var("W")])])],
+        vec![],
+        vec![(var("W"), atom("b"))]));
+    db.add(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), atom("b")])]),
+        vec![pred("does", vec![var("W"), pred("mark", vec![var("J"), var("K")])]),
+            pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])],
+        vec![],
+        vec![(var("M"), var("J"))]));
+    db.add(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), atom("b")])]),
+        vec![pred("does", vec![var("W"), pred("mark", vec![var("J"), var("K")])]),
+            pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])],
+        vec![],
+        vec![(var("N"), var("K"))]));
+    db.add(fact(pred("next", vec![pred("control", vec![atom("o")])]),
+        vec![pred("true", vec![pred("control", vec![atom("x")])])],
+        vec![], vec![]));
+    db.add(fact(pred("next", vec![pred("control", vec![atom("x")])]),
+        vec![pred("true", vec![pred("control", vec![atom("o")])])],
+        vec![], vec![]));
+
+    db.add(fact(pred("goal", vec![atom("x"), atom("100")]),
+        vec![pred("line", vec![atom("x")])],
+        vec![pred("line", vec![atom("o")])],
+        vec![]));
+    db.add(fact(pred("goal", vec![atom("x"), atom("50")]),
+        vec![],
+        vec![pred("line", vec![atom("x")]), pred("line", vec![atom("o")])],
+        vec![]));
+    db.add(fact(pred("goal", vec![atom("x"), atom("0")]),
+        vec![pred("line", vec![atom("o")])],
+        vec![pred("line", vec![atom("x")])],
+        vec![]));
+    db.add(fact(pred("goal", vec![atom("o"), atom("100")]),
+        vec![pred("line", vec![atom("o")])],
+        vec![pred("line", vec![atom("x")])],
+        vec![]));
+    db.add(fact(pred("goal", vec![atom("o"), atom("50")]),
+        vec![],
+        vec![pred("line", vec![atom("o")]), pred("line", vec![atom("x")])],
+        vec![]));
+    db.add(fact(pred("goal", vec![atom("o"), atom("0")]),
+        vec![pred("line", vec![atom("x")])],
+        vec![pred("line", vec![atom("o")])],
+        vec![]));
+
+    db.add(fact(pred("line", vec![var("X")]),
+        vec![pred("row", vec![var("M"), var("X")])],
+        vec![],
+        vec![]));
+    db.add(fact(pred("line", vec![var("X")]),
+        vec![pred("column", vec![var("M"), var("X")])],
+        vec![],
+        vec![]));
+    db.add(fact(pred("line", vec![var("X")]),
+        vec![pred("diagonal", vec![var("X")])],
+        vec![],
+        vec![]));
+
+    db.add(fact(pred("row", vec![var("M"), var("X")]),
+        (1..4).map(|i| pred("true", vec![pred("cell", vec![var("M"), Atom(i.to_string()), var("X")])])).collect(),
+        vec![], vec![]));
+    db.add(fact(pred("column", vec![var("M"), var("X")]),
+        (1..4).map(|i| pred("true", vec![pred("cell", vec![Atom(i.to_string()), var("M"), var("X")])])).collect(),
+        vec![], vec![]));
+    db.add(fact(pred("diagonal", vec![var("X")]),
+        (1..4).map(|i| pred("true", vec![pred("cell", vec![Atom(i.to_string()), Atom(i.to_string()), var("X")])])).collect(),
+        vec![], vec![]));
+    db.add(fact(pred("diagonal", vec![var("X")]),
+        (1..4).map(|i| pred("true", vec![pred("cell", vec![Atom(i.to_string()), Atom((4-i).to_string()), var("X")])])).collect(),
+        vec![], vec![]));
+
+    db.add(fact(atom("terminal"), vec![pred("line", vec![var("W")]), pred("role", vec![var("W")])], vec![], vec![]));
+    db.add(fact(atom("terminal"), vec![], vec![atom("open")], vec![]));
+
+    db.add(fact(atom("open"), vec![pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])], vec![], vec![]));
+
+    db
+}
+
+pub fn fact(cons: Expr, pos: Vec<Expr>, neg: Vec<Expr>, distinct: Vec<(Expr, Expr)>) -> Fact { Fact { cons: cons, pos: pos.into_boxed_slice(), neg: neg.into_boxed_slice(), distinct: distinct.into_boxed_slice() } }
+pub fn pred(name: &str, args: Vec<Expr>) -> Expr { Pred(name.to_string(), args.into_boxed_slice()) }
+pub fn atom(x: &str) -> Expr { Atom(x.to_string()) }
+pub fn var(x: &str) -> Expr { Var(x.to_string()) }
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use super::Expr::*;
-
-    fn fact(cons: Expr, pos: Vec<Expr>, neg: Vec<Expr>, distinct: Vec<(Expr, Expr)>) -> Fact { Fact { cons: cons, pos: pos.into_boxed_slice(), neg: neg.into_boxed_slice(), distinct: distinct.into_boxed_slice() } }
-    fn pred(name: &str, args: Vec<Expr>) -> Expr { Pred(name.to_string(), args.into_boxed_slice()) }
-    fn atom(x: &str) -> Expr { Atom(x.to_string()) }
-    fn var(x: &str) -> Expr { Var(x.to_string()) }
 
     #[test]
     fn atoms() {
@@ -311,111 +491,6 @@ mod tests {
         assert_eq!(1, db.query(&man_var).count()); // man(X)?
         assert_eq!(1, db.query(&thing_atom).count()); // thing(socrates)?
         assert_eq!(1, db.query(&thing_var).count()); // thing(X)?
-    }
-
-    fn set_up_tic_tac_toe() -> DB {
-        // based on the example in http://games.stanford.edu/index.php/intro-to-gdl
-        let mut db = DB::new();
-
-        let roles = ["x", "o"];
-        for r in roles.iter() { db.add(fact(pred("role", vec![atom(r)]), vec![], vec![], vec![])) }
-        
-        db.add(fact(pred("input", vec![var("R"), pred("mark", vec![var("M"), var("N")])]), vec![pred("role", vec![var("R")]), pred("index", vec![var("M")]), pred("index", vec![var("N")])], vec![], vec![]));
-        db.add(fact(pred("input", vec![var("R"), atom("noop")]), vec![pred("role", vec![var("R")])], vec![], vec![]));
-
-        for i in 1..4 { db.add(fact(pred("index", vec![Atom(i.to_string())]), vec![], vec![], vec![])) }
-
-        for m in ["x", "o", "b"].iter() { db.add(fact(pred("base", vec![pred("cell", vec![var("M"), var("N"), atom(m)])]), vec![pred("index", vec![var("M")]), pred("index", vec![var("N")])], vec![], vec![])) }
-        for r in roles.iter() { db.add(fact(pred("base", vec![pred("control", vec![atom(r)])]), vec![], vec![], vec![])) }
-
-        for x in 1..4 { for y in 1..4 { db.add(fact(pred("init", vec![pred("cell", vec![Atom(x.to_string()), Atom(y.to_string()), atom("b")])]), vec![], vec![], vec![])) } }
-        db.add(fact(pred("init", vec![pred("control", vec![atom("x")])]), vec![], vec![], vec![]));
-
-        db.add(fact(pred("legal", vec![var("W"), pred("mark", vec![var("X"), var("Y")])]),
-            vec![pred("true", vec![pred("cell", vec![var("X"), var("Y"), atom("b")])]), pred("true", vec![pred("control", vec![var("W")])])],
-            vec![], vec![]));
-        db.add(fact(pred("legal", vec![atom("x"), atom("noop")]), vec![pred("true", vec![pred("control", vec![atom("o")])])], vec![], vec![]));
-        db.add(fact(pred("legal", vec![atom("o"), atom("noop")]), vec![pred("true", vec![pred("control", vec![atom("x")])])], vec![], vec![]));
-        
-        db.add(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), var("R")])]),
-            vec![pred("does", vec![var("R"), pred("mark", vec![var("M"), var("N")])]),
-                pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])],
-            vec![], vec![]));
-        db.add(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), var("W")])]),
-            vec![pred("true", vec![pred("cell", vec![var("M"), var("N"), var("W")])])],
-            vec![],
-            vec![(var("W"), atom("b"))]));
-        db.add(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), atom("b")])]),
-            vec![pred("does", vec![var("W"), pred("mark", vec![var("J"), var("K")])]),
-                pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])],
-            vec![],
-            vec![(var("M"), var("J"))]));
-        db.add(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), atom("b")])]),
-            vec![pred("does", vec![var("W"), pred("mark", vec![var("J"), var("K")])]),
-                pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])],
-            vec![],
-            vec![(var("N"), var("K"))]));
-        db.add(fact(pred("next", vec![pred("control", vec![atom("o")])]),
-            vec![pred("true", vec![pred("control", vec![atom("x")])])],
-            vec![], vec![]));
-
-        db.add(fact(pred("goal", vec![atom("x"), atom("100")]),
-            vec![pred("line", vec![atom("x")])],
-            vec![pred("line", vec![atom("o")])],
-            vec![]));
-        db.add(fact(pred("goal", vec![atom("x"), atom("50")]),
-            vec![],
-            vec![pred("line", vec![atom("x")]), pred("line", vec![atom("o")])],
-            vec![]));
-        db.add(fact(pred("goal", vec![atom("x"), atom("0")]),
-            vec![pred("line", vec![atom("o")])],
-            vec![pred("line", vec![atom("x")])],
-            vec![]));
-        db.add(fact(pred("goal", vec![atom("o"), atom("100")]),
-            vec![pred("line", vec![atom("o")])],
-            vec![pred("line", vec![atom("x")])],
-            vec![]));
-        db.add(fact(pred("goal", vec![atom("o"), atom("50")]),
-            vec![],
-            vec![pred("line", vec![atom("o")]), pred("line", vec![atom("x")])],
-            vec![]));
-        db.add(fact(pred("goal", vec![atom("o"), atom("0")]),
-            vec![pred("line", vec![atom("x")])],
-            vec![pred("line", vec![atom("o")])],
-            vec![]));
-
-        db.add(fact(pred("line", vec![var("X")]),
-            vec![pred("row", vec![var("M"), var("X")])],
-            vec![],
-            vec![]));
-        db.add(fact(pred("line", vec![var("X")]),
-            vec![pred("column", vec![var("M"), var("X")])],
-            vec![],
-            vec![]));
-        db.add(fact(pred("line", vec![var("X")]),
-            vec![pred("diagonal", vec![var("X")])],
-            vec![],
-            vec![]));
-
-        db.add(fact(pred("row", vec![var("M"), var("X")]),
-            (1..4).map(|i| pred("true", vec![pred("cell", vec![var("M"), Atom(i.to_string()), var("X")])])).collect(),
-            vec![], vec![]));
-        db.add(fact(pred("column", vec![var("M"), var("X")]),
-            (1..4).map(|i| pred("true", vec![pred("cell", vec![Atom(i.to_string()), var("M"), var("X")])])).collect(),
-            vec![], vec![]));
-        db.add(fact(pred("diagonal", vec![var("X")]),
-            (1..4).map(|i| pred("true", vec![pred("cell", vec![Atom(i.to_string()), Atom(i.to_string()), var("X")])])).collect(),
-            vec![], vec![]));
-        db.add(fact(pred("diagonal", vec![var("X")]),
-            (1..4).map(|i| pred("true", vec![pred("cell", vec![Atom(i.to_string()), Atom((4-i).to_string()), var("X")])])).collect(),
-            vec![], vec![]));
-
-        db.add(fact(atom("terminal"), vec![pred("line", vec![var("W")])], vec![], vec![]));
-        db.add(fact(atom("terminal"), vec![], vec![atom("open")], vec![]));
-
-        db.add(fact(atom("open"), vec![pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])], vec![], vec![]));
-
-        db
     }
 
     #[test]
@@ -459,14 +534,17 @@ mod tests {
     fn tic_tac_toe_playthrough() {
         use rand::{weak_rng, Rng};
 
-        let ggp = GGP::from_rules(set_up_tic_tac_toe());
         let mut rng = weak_rng();
+        let mut ggp = GGP::from_rules(set_up_tic_tac_toe());
+
+        assert!(!ggp.is_done());
         while !ggp.is_done() {
             let moves = ggp.roles().into_iter().map(|r| {
                 let all = ggp.legal_moves_for(&r);
                 assert!(!all.is_empty());
                 (r, rng.choose(&all[..]).unwrap().clone())
-            });
+            }).collect::<Vec<_>>();
+            ggp.play(&moves[..]);
         }
     }
 }

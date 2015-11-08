@@ -270,6 +270,7 @@ mod tests {
     use go::Go;
     use ninemensmorris::NineMensMorris;
     use tictactoe::TicTacToe;
+    use ggp::GGPTicTacToe;
     use connectfour::ConnectFour;
 
     fn bench_mc_iteration<G: Game>(bench: &mut Bencher) {
@@ -292,6 +293,11 @@ mod tests {
     #[bench]
     fn tictactoe(bench: &mut Bencher) {
         bench_mc_iteration::<TicTacToe>(bench)
+    }
+
+    #[bench]
+    fn ggptictactoe(bench: &mut Bencher) {
+        bench_mc_iteration::<GGPTicTacToe>(bench)
     }
 
     #[bench]
