@@ -209,26 +209,43 @@ impl DB {
     }
 }
 
-struct GGP {
+pub struct GGP {
     base: DB,
     cur: DB
 }
 
 impl GGP {
-    fn roles(&self) -> Vec<Expr> {
+    pub fn from_rules(base: DB) -> GGP {
+        let mut cur = base.clone();
+        let init_query = Pred("init".into(), Box::new([Var("X".into())]));
+        for init in base.query(&init_query) {
+            match init {
+                Pred(_, args) => cur.add(Fact { cons: Pred("true".into(), args.clone()), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }),
+                _ => unreachable!()
+            }
+        }
+        GGP { base: base, cur: cur }
+    }
+    pub fn roles(&self) -> Vec<String> {
         let query = Pred("role".into(), Box::new([Var("X".into())]));
+        let ret = self.cur.query(&query).map(|x| match x {
+            Pred(_, args) => match &args[1] {
+                &Atom(ref s) => s.clone(),
+                _ => unreachable!()
+            },
+            _ => unreachable!()
+        }).collect();
+        ret
+    }
+    pub fn legal_moves_for(&self, r: &str) -> Vec<Expr> {
+        let query = Pred("legal".into(), Box::new([Atom(r.into()), Var("X".into())]));
         let ret = self.cur.query(&query).map(|x| match x { Pred(_, args) => args[1].clone(), _ => unreachable!() }).collect();
         ret
     }
-    fn legal_moves_for(&self, r: &Expr) -> Vec<Expr> {
-        let query = Pred("legal".into(), Box::new([r.clone(), Var("X".into())]));
-        let ret = self.cur.query(&query).map(|x| match x { Pred(_, args) => args[1].clone(), _ => unreachable!() }).collect();
-        ret
-    }
-    fn play(&mut self, moves: &[(Expr, Expr)]) {
+    pub fn play(&mut self, moves: &[(String, Expr)]) {
         let mut db = replace(&mut self.cur, self.base.clone());
         for &(ref r, ref m) in moves.iter() {
-            db.add(Fact { cons: Pred("does".into(), Box::new([r.clone(), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
+            db.add(Fact { cons: Pred("does".into(), Box::new([Atom(r.clone()), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
         }
         let next_query = Pred("next".into(), Box::new([Var("X".into())]));
         for next in db.query(&next_query) {
@@ -237,6 +254,20 @@ impl GGP {
                 _ => unreachable!()
             }
         }
+    }
+    pub fn is_done(&self) -> bool {
+        self.cur.check(&Atom("terminal".into()))
+    }
+    pub fn goals(&self) -> HashMap<String, u8> {
+        let query = Pred("goal".into(), Box::new([Var("X".into()), Var("Y".into())]));
+        let ret = self.cur.query(&query).map(|g| match g {
+            Pred(_, args) => match (&args[0], &args[1]) {
+                (&Atom(ref r), &Atom(ref s)) => (r.clone(), s.parse().unwrap()),
+                _ => unreachable!()
+            },
+            _ => unreachable!()
+        }).collect();
+        ret
     }
 }
 
@@ -282,8 +313,7 @@ mod tests {
         assert_eq!(1, db.query(&thing_var).count()); // thing(X)?
     }
 
-    #[test]
-    fn tic_tac_toe() {
+    fn set_up_tic_tac_toe() -> DB {
         // based on the example in http://games.stanford.edu/index.php/intro-to-gdl
         let mut db = DB::new();
 
@@ -385,6 +415,13 @@ mod tests {
 
         db.add(fact(atom("open"), vec![pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])], vec![], vec![]));
 
+        db
+    }
+
+    #[test]
+    fn tic_tac_toe() {
+        let mut db = set_up_tic_tac_toe();
+
         let role_query = pred("role", vec![var("X")]);
         assert_eq!(2, db.query(&role_query).count());
 
@@ -416,5 +453,20 @@ mod tests {
 
         // let next_query = pred("next", vec![var("X")]);
         // assert_eq!(10, db.query(&next_query).count()); // This would pass if results had no duplicates. (Should they?)
+    }
+
+    #[test]
+    fn tic_tac_toe_playthrough() {
+        use rand::{weak_rng, Rng};
+
+        let ggp = GGP::from_rules(set_up_tic_tac_toe());
+        let mut rng = weak_rng();
+        while !ggp.is_done() {
+            let moves = ggp.roles().into_iter().map(|r| {
+                let all = ggp.legal_moves_for(&r);
+                assert!(!all.is_empty());
+                (r, rng.choose(&all[..]).unwrap().clone())
+            });
+        }
     }
 }
