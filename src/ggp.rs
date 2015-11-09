@@ -94,7 +94,7 @@ fn parse_expr(s: &str) -> Parsed<Expr> {
         }
         if rest.is_empty() { Err(()) } else { Ok((Pred(head.into(), args.into_boxed_slice()), &rest[1..])) }
     } else {
-        parse_word(s).map(|(s, r)| (if s.starts_with('?') { Var(s.into()) } else { Atom(s.into()) }, r))
+        parse_word(s).map(|(s, r)| (if s.starts_with('?') { Var(s[1..].into()) } else { Atom(s.into()) }, r))
     }
 }
 
