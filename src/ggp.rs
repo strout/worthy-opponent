@@ -9,6 +9,7 @@ use self::{ValExpr as V};
 use std::mem::replace;
 use game::Game;
 use rand::distributions::Weighted;
+use std::str::FromStr;
 
 #[derive(Clone, Debug)]
 struct Assignments {
@@ -74,6 +75,29 @@ impl Display for Expr {
     }
 }
 
+type Parsed<'a, T> = Result<(T, &'a str), ()>;
+
+fn parse_word(s: &str) -> Parsed<&str> {
+    let end = s.find(|c: char| c == '(' || c == ')' || c.is_whitespace()).unwrap_or(s.len());
+    if end == 0 { Err(()) } else { Ok(s.split_at(end)) }
+}
+
+fn parse_expr(s: &str) -> Parsed<Expr> {
+    if s.starts_with('(') {
+        let (head, rest) = try!(parse_word(s[1..].trim_left()));
+        let mut rest = rest.trim_left();
+        let mut args = vec![];
+        while !rest.starts_with(')') && !rest.is_empty() {
+            let (arg, next) = try!(parse_expr(rest));
+            args.push(arg);
+            rest = next.trim_left();
+        }
+        if rest.is_empty() { Err(()) } else { Ok((Pred(head.into(), args.into_boxed_slice()), &rest[1..])) }
+    } else {
+        parse_word(s).map(|(s, r)| (if s.starts_with('?') { Var(s.into()) } else { Atom(s.into()) }, r))
+    }
+}
+
 #[derive(Clone)]
 pub struct Fact {
     cons: Expr,
@@ -100,6 +124,36 @@ impl Display for Fact {
         write!(fmt, ")")
     }
 }
+
+fn parse_fact(s: &str) -> Parsed<Fact> {
+    // TODO make this implementation less hacky -- right now it abuses parse_expr
+    let (expr, rest) = try!(parse_expr(s));
+    match expr {
+        Var(_) => Err(()),
+        Atom(_) => Ok((Fact { cons: expr, pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }, rest)),
+        Pred(name, args) => {
+            match &name as &str {
+                "<=" => {
+                    let (head, body) = args.split_at(1);
+                    let (mut pos, mut neg, mut distinct) = (vec![], vec![], vec![]);
+                    for arg in body.iter() {
+                        match arg {
+                            &Pred(ref name, ref args) => match name as &str {
+                                "not" => neg.push(args[0].clone()),
+                                "distinct" => distinct.push((args[0].clone(), args[1].clone())),
+                                _ => pos.push(arg.clone())
+                            },
+                            _ => pos.push(arg.clone())
+                        }
+                    }
+                    Ok((Fact { cons: head[0].clone(), pos: pos.into_boxed_slice(), neg: neg.into_boxed_slice(), distinct: distinct.into_boxed_slice() }, rest))
+                },
+                _ => Ok((Fact { cons: Pred(name, args), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }, rest))
+            }
+        }
+    }
+}
+
 impl Assignments {
     fn new() -> Assignments { Assignments { vars: HashMap::new(), vals: vec![] } }
     fn get_val(&self, base: &V) -> V {
@@ -166,6 +220,27 @@ impl Display for DB {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
         for f in self.facts.values().flat_map(|x| x.iter()) { try!(writeln!(fmt, "{}", f)) }
         Ok(())
+    }
+}
+
+fn parse_db(mut s: &str) -> Parsed<DB> {
+    let mut db = DB::new();
+    while let Ok((f, rest)) = parse_fact(s.trim_left()) {
+        db.add(f);
+        s = rest;
+    }
+    Ok((db, s))
+}
+
+impl FromStr for DB {
+    type Err = ();
+    fn from_str(s: &str) -> Result<DB, ()> {
+        let (db, rest) = try!(parse_db(s));
+        if rest.trim_left().is_empty() {
+            Ok(db)
+        } else {
+            Err(())
+        }
     }
 }
 
