@@ -54,7 +54,7 @@ impl Display for ValExpr {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Expr {
     Atom(String),
     Var(String),
@@ -251,7 +251,10 @@ impl GGP {
             db.add(Fact { cons: Pred("does".into(), Box::new([Atom(r.clone()), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
         }
         let next_query = Pred("next".into(), Box::new([Var("X".into())]));
-        for next in db.query(&next_query) {
+        let mut nexts = db.query(&next_query).collect::<Vec<_>>();
+        nexts.sort();
+        nexts.dedup(); // TODO shouldn't have to do this..
+        for next in nexts {
             match next {
                 Pred(_, args) => self.cur.add(Fact { cons: Pred("true".into(), args.clone()), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }),
                 _ => unreachable!()
@@ -308,7 +311,7 @@ impl Game for GGPTicTacToe {
         let moves = self.ggp.legal_moves_for(&c);
         moves.into_iter().map(|mv| match mv {
             Pred(_, args) => match (&args[0], &args[1]) {
-                (&Atom(ref col), &Atom(ref row)) => Weighted { weight: 1, item: col.parse::<usize>().unwrap() + 3 * row.parse::<usize>().unwrap() },
+                (&Atom(ref col), &Atom(ref row)) => Weighted { weight: 1, item: col.parse::<usize>().unwrap() - 1 + 3 * (row.parse::<usize>().unwrap() - 1) },
                 _ => unreachable!()
             },
             _ => unreachable!()
@@ -321,11 +324,11 @@ impl Game for GGPTicTacToe {
     }
 
     fn play(&mut self, &x: &usize) {
-        let row = x / 3;
-        let col = x % 3;
+        let row = x / 3 + 1;
+        let col = x % 3 + 1;
         let c = self.current_player();
         let mvs = self.ggp.roles().into_iter().map(|r| if r == c {
-            (r, Pred("move".into(), Box::new([Atom(format!("{}", col)), Atom(format!("{}", row))])))
+            (r, Pred("mark".into(), Box::new([Atom(format!("{}", col)), Atom(format!("{}", row))])))
         } else {
             (r, Atom("noop".into()))
         }).collect::<Vec<_>>();

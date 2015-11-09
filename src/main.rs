@@ -30,6 +30,7 @@ use tictactoe::TicTacToe;
 use connectfour::ConnectFour;
 use ninemensmorris::NineMensMorris;
 use go::Go;
+use ggp::GGPTicTacToe;
 
 pub struct MCTree<M> {
     wins: f64,
@@ -199,6 +200,7 @@ fn run<'a, G: Game, R: BufRead, W: Write>(think_ms: u32, input: &mut R, output: 
         sendcmd.send(cmd).unwrap();
         if is_gen {
             let mv = recvmv.recv().unwrap();
+            println!("Sending {}.", mv);
             write!(output, "move {}\0", mv).unwrap();
         } else {
             output.write(b"ready\0").unwrap();
@@ -249,7 +251,7 @@ fn main() {
                 let think_ms = cmd.args["milliseconds-per-move"].parse().unwrap();
                 output.write(b"ready\0").unwrap();
                 match cmd.args["game"] {
-                    "tictactoe" => run::<TicTacToe,_,_>(think_ms, &mut input, &mut output),
+                    "tictactoe" => if std::env::args().nth(1) == Some("ggp".into()) { run::<GGPTicTacToe,_,_>(think_ms, &mut input, &mut output) } else { run::<TicTacToe,_,_>(think_ms, &mut input, &mut output) },
                     "connectfour" => run::<ConnectFour,_,_>(think_ms, &mut input, &mut output),
                     "ninemensmorris" => run::<NineMensMorris,_,_>(think_ms, &mut input, &mut output),
                     "go" => run::<Go,_,_>(think_ms, &mut input, &mut output),
