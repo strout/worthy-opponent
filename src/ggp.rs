@@ -41,12 +41,9 @@ impl Display for ValExpr {
             &V::Atom(ref s) => s.fmt(fmt),
             &V::Var(ref i) => write!(fmt, "?{}", i),
             &V::Pred(ref name, ref args) => {
-                try!(write!(fmt, "{}(", name));
-                let mut first = true;
+                try!(write!(fmt, "({}", name));
                 for arg in args.iter() {
-                    if !first { try!(write!(fmt, ", ")) }
-                    try!(arg.fmt(fmt));
-                    first = false
+                    try!(write!(fmt, " {}", arg))
                 }
                 write!(fmt, ")")
             }
@@ -65,14 +62,11 @@ impl Display for Expr {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
         match self {
             &Atom(ref s) => s.fmt(fmt),
-            &Var(ref s) => s.fmt(fmt),
+            &Var(ref s) => write!(fmt, "?{}", s),
             &Pred(ref name, ref args) => {
-                try!(write!(fmt, "{}(", name));
-                let mut first = true;
+                try!(write!(fmt, "({}", name));
                 for arg in args.iter() {
-                    if !first { try!(write!(fmt, ", ")) }
-                    try!(arg.fmt(fmt));
-                    first = false
+                    try!(write!(fmt, " {}", arg));
                 }
                 write!(fmt, ")")
             }
@@ -90,27 +84,20 @@ pub struct Fact {
 
 impl Display for Fact {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
-        try!(write!(fmt, "{}", self.cons));
-        if !self.pos.is_empty() || !self.neg.is_empty() || !self.distinct.is_empty() {
-            try!(write!(fmt, " :- "));
+        if self.pos.is_empty() && self.neg.is_empty() && self.distinct.is_empty() {
+            return write!(fmt, "{}", self.cons);
         }
-        let mut first = true;
+        try!(write!(fmt, "(<= {}", self.cons));
         for p in self.pos.iter() {
-            if !first { try!(write!(fmt, " & ")) }
-            first = false;
-            try!(write!(fmt, "{}", p));
+            try!(write!(fmt, " {}", p));
         }
         for n in self.neg.iter() {
-            if !first { try!(write!(fmt, " & ")) }
-            first = false;
-            try!(write!(fmt, "~{}", n));
+            try!(write!(fmt, " (not {})", n));
         }
         for &(ref l, ref r) in self.distinct.iter() {
-            if !first { try!(write!(fmt, " & ")) }
-            first = false;
-            try!(write!(fmt, "distinct({}, {})", l, r));
+            try!(write!(fmt, " distinct({}, {})", l, r));
         }
-        Ok(())
+        write!(fmt, ")")
     }
 }
 impl Assignments {
