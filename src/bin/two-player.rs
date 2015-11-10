@@ -1,12 +1,10 @@
 #![cfg_attr(test, feature(test))]
 
+extern crate worthy_opponent;
 extern crate rand;
-extern crate bit_set;
 
 #[cfg(test)]
 extern crate test;
-#[cfg(test)]
-extern crate quickcheck;
 
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
@@ -17,20 +15,11 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::str::from_utf8;
 
-mod game;
-mod basics;
-mod go;
-mod tictactoe;
-mod connectfour;
-mod ninemensmorris;
-mod ggp;
-
-use game::Game;
-use tictactoe::TicTacToe;
-use connectfour::ConnectFour;
-use ninemensmorris::NineMensMorris;
-use go::Go;
-use ggp::GGPTicTacToe;
+use worthy_opponent::game::Game;
+use worthy_opponent::tictactoe::TicTacToe;
+use worthy_opponent::connectfour::ConnectFour;
+use worthy_opponent::ninemensmorris::NineMensMorris;
+use worthy_opponent::go::Go;
 
 pub struct MCTree<M> {
     wins: f64,
@@ -251,7 +240,7 @@ fn main() {
                 let think_ms = cmd.args["milliseconds-per-move"].parse().unwrap();
                 output.write(b"ready\0").unwrap();
                 match cmd.args["game"] {
-                    "tictactoe" => if std::env::args().nth(1) == Some("ggp".into()) { run::<GGPTicTacToe,_,_>(think_ms, &mut input, &mut output) } else { run::<TicTacToe,_,_>(think_ms, &mut input, &mut output) },
+                    "tictactoe" => run::<TicTacToe,_,_>(think_ms, &mut input, &mut output),
                     "connectfour" => run::<ConnectFour,_,_>(think_ms, &mut input, &mut output),
                     "ninemensmorris" => run::<NineMensMorris,_,_>(think_ms, &mut input, &mut output),
                     "go" => run::<Go,_,_>(think_ms, &mut input, &mut output),
@@ -266,14 +255,13 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use game::Game;
+    use worthy_opponent::game::Game;
     use test::Bencher;
     use rand::weak_rng;
-    use go::Go;
-    use ninemensmorris::NineMensMorris;
-    use tictactoe::TicTacToe;
-    use ggp::GGPTicTacToe;
-    use connectfour::ConnectFour;
+    use worthy_opponent::go::Go;
+    use worthy_opponent::ninemensmorris::NineMensMorris;
+    use worthy_opponent::tictactoe::TicTacToe;
+    use worthy_opponent::connectfour::ConnectFour;
 
     fn bench_mc_iteration<G: Game>(bench: &mut Bencher) {
         let mut mc = MCTree::new(0);
@@ -295,11 +283,6 @@ mod tests {
     #[bench]
     fn tictactoe(bench: &mut Bencher) {
         bench_mc_iteration::<TicTacToe>(bench)
-    }
-
-    #[bench]
-    fn ggptictactoe(bench: &mut Bencher) {
-        bench_mc_iteration::<GGPTicTacToe>(bench)
     }
 
     #[bench]

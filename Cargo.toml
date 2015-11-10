@@ -13,6 +13,7 @@ debug = true
 [dependencies]
 rand = "*"
 bit-set = "*"
+tiny_http = "*"
 
 [dev-dependencies]
 quickcheck = "*"
