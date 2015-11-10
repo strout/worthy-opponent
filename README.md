@@ -12,7 +12,7 @@ Currently three games are implemented: [Tic-tac-toe](https://en.wikipedia.org/wi
 
 ## How to run it
 
-    cargo run --release -- playername [server:port]
+    cargo run --release --bin two-player -- playername [server:port]
 
 The default value for `server:port` is `127.0.0.1:11873`.
 
