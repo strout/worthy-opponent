@@ -104,20 +104,22 @@ fn random_move<R: Rng, G: Game>(rng: &mut R, g: &G) -> G::Move {
 fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
     debug_assert!(g.payoff().is_none());
     let mut flip = false;
+    let mut discount = 1.00;
     loop
     {
         let mv = random_move(rng, g);
         g.play(&mv);
         flip = !flip;
+        discount = 0.99 * discount;
         match g.payoff() {
-            Some(p) => return if flip { 1.0 - p } else { p },
+            Some(p) => return if flip { discount * (1.0 - p) + (1.0 - discount) * 0.5 } else { discount * p + (1.0 - discount) * 0.5 },
             None => {}
         }
     }
 }
 
 pub fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree<G::Move>) -> f64 {
-    let p = 1.0 - match g.payoff() {
+    let p = 0.99 * (1.0 - match g.payoff() {
         Some(p) => p,
         None => if mc.plays == 0 {
             play_out(rng, g)
@@ -127,7 +129,7 @@ pub fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree<G::
             g.play(mv);
             mc_iteration(rng, g, rep)
         }
-    };
+    }) + 0.01 * 0.05;
     mc.wins += p;
     mc.plays += 1;
     p
