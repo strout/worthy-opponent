@@ -5,9 +5,10 @@ extern crate worthy_opponent;
 use tiny_http::{ServerBuilder, Response};
 use rand::{Rng, weak_rng};
 use std::collections::HashMap;
-use worthy_opponent::ggp::{Expr, GGP};
+use worthy_opponent::ggp::{Expr, GGP, db_from_str};
 use std::hash::Hash;
 use std::fmt::Display;
+use std::borrow::Cow;
 
 #[derive(Debug)]
 struct MCTree<A: Eq + Hash, B: Eq + Hash> {
@@ -38,7 +39,7 @@ fn print_mc<A: Eq + Hash + Display, B: Eq + Hash>(mc: &MCTree<A, B>, chosen: Opt
     println!("");
 }
 
-fn choose_move<'a, T: Rng>(rng: &mut T, ggp: &GGP, role: &str, mc: &'a mut MCTree<Expr, Vec<Expr>>, explore: f64) -> (Expr, &'a mut MCTree<Vec<Expr>, Expr>) {
+fn choose_move<'a, 'b, T: Rng>(rng: &mut T, ggp: &GGP<'b>, role: &Cow<'b, str>, mc: &'a mut MCTree<Expr<'b>, Vec<Expr<'b>>>, explore: f64) -> (Expr<'b>, &'a mut MCTree<Vec<Expr<'b>>, Expr<'b>>) {
     if mc.children.is_empty() {
         let mvs = ggp.legal_moves_for(role);
         mc.children.reserve(mvs.len());
@@ -66,7 +67,7 @@ fn choose_move<'a, T: Rng>(rng: &mut T, ggp: &GGP, role: &str, mc: &'a mut MCTre
     (mv, child)
 }
 
-fn tree_search<T: Rng>(rng: &mut T, ggp: &mut GGP, mcs: &mut [(&str, &mut MCTree<Expr, Vec<Expr>>)]) -> HashMap<String, f64> {
+fn tree_search<'a, T: Rng>(rng: &mut T, ggp: &mut GGP<'a>, mcs: &mut [(&Cow<'a, str>, &mut MCTree<Expr<'a>, Vec<Expr<'a>>>)]) -> HashMap<Cow<'a, str>, f64> {
     let result = if ggp.is_done() {
         println!("I found a terminal state!");
         ggp.goals().into_iter().map(|(k, v)| (k, v as f64)).collect()
@@ -97,7 +98,7 @@ fn tree_search<T: Rng>(rng: &mut T, ggp: &mut GGP, mcs: &mut [(&str, &mut MCTree
     result
 }
 
-fn play_out<T: Rng>(rng: &mut T, ggp: &mut GGP, roles: &[&str]) -> HashMap<String, f64> {
+fn play_out<'a, T: Rng>(rng: &mut T, ggp: &mut GGP<'a>, roles: &[&Cow<'a, str>]) -> HashMap<Cow<'a, str>, f64> {
     if ggp.is_done() {
         ggp.goals().into_iter().map(|(k, v)| (k, v as f64)).collect()
     } else {
@@ -119,10 +120,10 @@ fn main() {
     for mut req in srv.incoming_requests() {
         let mut body = String::new();
         req.as_reader().read_to_string(&mut body).unwrap();
-        let ggp = GGP::from_rules(body.parse().unwrap());
+        let ggp = GGP::from_rules(db_from_str(&body).unwrap());
         let mut mcs = ggp.roles().into_iter().map(|r| (r, MCTree::new())).collect::<Vec<_>>();
         for _ in 0.. {
-            tree_search(&mut rng, &mut ggp.clone(), &mut mcs.iter_mut().map(|&mut (ref r, ref mut mc)| (r as &str, mc)).collect::<Vec<_>>()[..]);
+            tree_search(&mut rng, &mut ggp.clone(), &mut mcs.iter_mut().map(|&mut (ref r, ref mut mc)| (r, mc)).collect::<Vec<_>>()[..]);
             for &(ref r, ref mc) in mcs.iter() {
                 println!("For {}", r);
                 print_mc(mc, None);

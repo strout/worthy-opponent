@@ -7,15 +7,15 @@ use std::result::Result;
 use self::Expr::*;
 use self::{ValExpr as V};
 use std::mem::replace;
-use std::str::FromStr;
+use std::borrow::Cow;
 
 #[derive(Clone, Debug)]
-struct Assignments {
-    vars: HashMap<String, usize>,
-    vals: Vec<ValExpr>
+struct Assignments<'a> {
+    vars: HashMap<Cow<'a, str>, usize>,
+    vals: Vec<ValExpr<'a>>
 }
 
-impl Display for Assignments {
+impl<'a> Display for Assignments<'a> {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
         let mut first = true;
         for (k, &v) in self.vars.iter() {
@@ -28,13 +28,13 @@ impl Display for Assignments {
 }
 
 #[derive(Clone, Debug)]
-enum ValExpr {
-    Atom(String),
+enum ValExpr<'a> {
+    Atom(Cow<'a, str>),
     Var(usize),
-    Pred(String, Box<[ValExpr]>)
+    Pred(Cow<'a, str>, Box<[ValExpr<'a>]>)
 }
 
-impl Display for ValExpr {
+impl<'a> Display for ValExpr<'a> {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
         match self {
             &V::Atom(ref s) => s.fmt(fmt),
@@ -51,13 +51,13 @@ impl Display for ValExpr {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Expr {
-    Atom(String),
-    Var(String),
-    Pred(String, Box<[Expr]>)
+pub enum Expr<'a> {
+    Atom(Cow<'a, str>),
+    Var(Cow<'a, str>),
+    Pred(Cow<'a, str>, Box<[Expr<'a>]>)
 }
 
-impl Display for Expr {
+impl<'a> Display for Expr<'a> {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
         match self {
             &Atom(ref s) => s.fmt(fmt),
@@ -107,14 +107,14 @@ fn parse_expr(s: &str) -> Parsed<Expr> {
 }
 
 #[derive(Clone)]
-pub struct Fact {
-    cons: Expr,
-    pos: Box<[Expr]>,
-    neg: Box<[Expr]>,
-    distinct: Box<[(Expr, Expr)]>
+pub struct Fact<'a> {
+    cons: Expr<'a>,
+    pos: Box<[Expr<'a>]>,
+    neg: Box<[Expr<'a>]>,
+    distinct: Box<[(Expr<'a>, Expr<'a>)]>
 }
 
-impl Display for Fact {
+impl<'a> Display for Fact<'a> {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
         if self.pos.is_empty() && self.neg.is_empty() && self.distinct.is_empty() {
             return write!(fmt, "{}", self.cons);
@@ -133,7 +133,7 @@ impl Display for Fact {
     }
 }
 
-fn add_arg<'a, I: Iterator<Item=(Vec<Expr>, Vec<Expr>, Vec<(Expr, Expr)>)> + 'a>(sofar: I, arg: &'a Expr) -> Box<Iterator<Item=(Vec<Expr>, Vec<Expr>, Vec<(Expr, Expr)>)> + 'a> {
+fn add_arg<'a, 'b, I: Iterator<Item=(Vec<Expr<'b>>, Vec<Expr<'b>>, Vec<(Expr<'b>, Expr<'b>)>)> + 'a>(sofar: I, arg: &'a Expr<'b>) -> Box<Iterator<Item=(Vec<Expr<'b>>, Vec<Expr<'b>>, Vec<(Expr<'b>, Expr<'b>)>)> + 'a> {
     match arg {
         &Pred(ref name, ref args) => match name as &str {
             "not" => Box::new(sofar.map(move |(pos, mut neg, distinct)| { neg.push(args[0].clone()); (pos, neg, distinct) })),
@@ -146,7 +146,7 @@ fn add_arg<'a, I: Iterator<Item=(Vec<Expr>, Vec<Expr>, Vec<(Expr, Expr)>)> + 'a>
     }
 }
 
-fn add_args<'a, I: Iterator<Item=&'a Expr>>(cons: &'a Expr, from: I) -> Box<Iterator<Item=Fact> + 'a> {
+fn add_args<'a, 'b, I: Iterator<Item=&'a Expr<'b>>>(cons: &'a Expr<'b>, from: I) -> Box<Iterator<Item=Fact<'b>> + 'a> {
     let base = Box::new(once((vec![], vec![], vec![]))) as Box<Iterator<Item=_>>;
     let ret = from.fold(base, add_arg);
     Box::new(ret.map(move |(pos, neg, distinct)| Fact { cons: cons.clone(), pos: pos.into_boxed_slice(), neg: neg.into_boxed_slice(), distinct: distinct.into_boxed_slice() }))
@@ -170,9 +170,9 @@ fn parse_fact(s: &str) -> Parsed<Vec<Fact>> {
     }
 }
 
-impl Assignments {
-    fn new() -> Assignments { Assignments { vars: HashMap::new(), vals: vec![] } }
-    fn get_val(&self, base: &V) -> V {
+impl<'a> Assignments<'a> {
+    fn new() -> Assignments<'a> { Assignments { vars: HashMap::new(), vals: vec![] } }
+    fn get_val(&self, base: &V<'a>) -> V<'a> {
         match base {
             &V::Var(mut i) => {
                 loop {
@@ -185,12 +185,12 @@ impl Assignments {
             _ => base.clone()
         }
     }
-    fn to_val(&mut self, expr: &Expr, suf: Option<usize>) -> V {
+    fn to_val(&mut self, expr: &Expr<'a>, suf: Option<usize>) -> V<'a> {
         match expr {
             &Atom(ref x) => V::Atom(x.clone()),
             &Var(ref x) => {
                 let vals = &mut self.vals;
-                let x = match suf { Some(n) => format!("{}${}", x, n), None => x.clone() };
+                let x = match suf { Some(n) => format!("{}${}", x, n).into(), None => x.clone() };
                 V::Var(*self.vars.entry(x).or_insert_with(|| { let i = vals.len(); vals.push(V::Var(i)); i }))
             },
             &Pred(ref name, ref args) => {
@@ -202,14 +202,14 @@ impl Assignments {
             }
         }
     }
-    fn from_val(&self, val: &V) -> Expr {
+    fn from_val(&self, val: &V<'a>) -> Expr<'a> {
         match self.get_val(val) {
             V::Atom(x) => Atom(x),
-            V::Var(i) => Var(format!("?{}", i)),
+            V::Var(i) => Var(i.to_string().into()),
             V::Pred(name, args) => Pred(name, args.iter().map(|arg| self.from_val(arg)).collect::<Vec<_>>().into_boxed_slice())
         }
     }
-    fn unify(mut self, left: &Expr, l_depth: Option<usize>, right: &Expr, r_depth: Option<usize>) -> Option<Assignments> {
+    fn unify(mut self, left: &Expr<'a>, l_depth: Option<usize>, right: &Expr<'a>, r_depth: Option<usize>) -> Option<Assignments<'a>> {
         let l_val = self.to_val(left, l_depth);
         let r_val = self.to_val(right, r_depth);
         if self.unify_val(&l_val, &r_val) {
@@ -218,7 +218,7 @@ impl Assignments {
             None
         }
     }
-    fn unify_val(&mut self, left: &V, right: &V) -> bool {
+    fn unify_val(&mut self, left: &V<'a>, right: &V<'a>) -> bool {
         match (self.get_val(left), self.get_val(right)) {
            (V::Atom(x), V::Atom(y)) => x == y,
            (V::Pred(l_name, l_args), V::Pred(r_name, r_args)) => l_name == r_name && l_args.iter().zip(r_args.iter()).all(|(l, r)| self.unify_val(l, r)),
@@ -230,9 +230,9 @@ impl Assignments {
 }
 
 #[derive(Clone)]
-pub struct DB { facts: HashMap<String, Vec<Fact>> }
+pub struct DB<'a> { facts: HashMap<Cow<'a, str>, Vec<Fact<'a>>> }
 
-impl Display for DB {
+impl<'a> Display for DB<'a> {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
         for f in self.facts.values().flat_map(|x| x.iter()) { try!(writeln!(fmt, "{}", f)) }
         Ok(())
@@ -249,41 +249,33 @@ fn parse_db(mut s: &str) -> Parsed<DB> {
     Ok((db, s))
 }
 
-impl FromStr for DB {
-    type Err = ();
-    fn from_str(s: &str) -> Result<DB, ()> {
-        let (db, rest) = try!(parse_db(s));
-        if rest.trim_left().is_empty() {
-            Ok(db)
-        } else {
-            Err(())
-        }
-    }
+pub fn db_from_str(s: &str) -> Result<DB, ()> {
+    parse_db(s).map(|x| x.0)
 }
 
-impl DB {
-    pub fn new() -> DB { DB { facts: HashMap::new() } }
-    pub fn query<'a>(&'a self, expr: &'a Expr) -> Box<Iterator<Item=Expr> + 'a> {
+impl<'a> DB<'a> {
+    pub fn new() -> DB<'a> { DB { facts: HashMap::new() } }
+    pub fn query<'b>(&'b self, expr: &'b Expr<'a>) -> Box<Iterator<Item=Expr<'a>> + 'b> {
         Box::new(self.query_inner(expr, Assignments::new(), None).map(move |mut asg| { let val = asg.to_val(expr, None); asg.from_val(&val) }))
     }
-    pub fn check(&self, e: &Expr) -> bool {
+    pub fn check(&self, e: &Expr<'a>) -> bool {
         self.query(e).next().is_some()
     }
-    pub fn add(&mut self, f: Fact) {
+    pub fn add(&mut self, f: Fact<'a>) {
         let e = match f.cons {
             Atom(ref n) | Pred(ref n, _) => self.facts.entry(n.clone()),
             Var(_) => panic!("Can't add a variable as a fact.")
         };
         e.or_insert(vec![]).push(f)
     }
-    fn query_inner<'a>(&'a self, expr: &'a Expr, asg: Assignments, depth: Option<usize>) -> Box<Iterator<Item=Assignments> + 'a> {
-        let relevant : Box<Iterator<Item=&'a Vec<Fact>> + 'a> = match expr {
+    fn query_inner<'b>(&'b self, expr: &'b Expr<'a>, asg: Assignments<'a>, depth: Option<usize>) -> Box<Iterator<Item=Assignments<'a>> + 'b> {
+        let relevant : Box<Iterator<Item=&'b Vec<Fact<'a>>> + 'b> = match expr {
             &Var(_) => Box::new(self.facts.values()),
             &Atom(ref n) | &Pred(ref n, _) => Box::new(self.facts.get(n).into_iter())
         };
         Box::new(relevant.flat_map(|x| x.iter()).flat_map(move |&Fact { ref cons, ref pos, ref neg, ref distinct }| {
             let r_depth = Some(asg.vars.len());
-            let pos = pos.iter().fold(Box::new(asg.clone().unify(expr, depth, &cons, r_depth).into_iter()) as Box<Iterator<Item=Assignments> + 'a>, move |asgs, p| Box::new(asgs.flat_map(move |asg| self.query_inner(p, asg, r_depth))));
+            let pos = pos.iter().fold(Box::new(asg.clone().unify(expr, depth, &cons, r_depth).into_iter()) as Box<Iterator<Item=Assignments> + 'b>, move |asgs, p| Box::new(asgs.flat_map(move |asg| self.query_inner(p, asg, r_depth))));
             let neg = neg.iter().fold(pos, move |asgs, n| Box::new(asgs.filter(move |asg| self.query_inner(n, asg.clone(), r_depth).next().is_none())));
             distinct.iter().fold(neg, move |asgs, &(ref l, ref r)| Box::new(asgs.filter(move |asg| asg.clone().unify(l, r_depth, r, r_depth).is_none())))
         }))
@@ -291,13 +283,13 @@ impl DB {
 }
 
 #[derive(Clone)]
-pub struct GGP {
-    base: DB,
-    cur: DB
+pub struct GGP<'a> {
+    base: DB<'a>,
+    cur: DB<'a>
 }
 
-impl GGP {
-    pub fn from_rules(base: DB) -> GGP {
+impl<'a> GGP<'a> {
+    pub fn from_rules(base: DB<'a>) -> GGP<'a> {
         let mut cur = base.clone();
         let init_query = Pred("init".into(), Box::new([Var("X".into())]));
         for init in base.query(&init_query) {
@@ -308,7 +300,7 @@ impl GGP {
         }
         GGP { base: base, cur: cur }
     }
-    pub fn roles(&self) -> Vec<String> {
+    pub fn roles(&self) -> Vec<Cow<'a, str>> {
         let query = Pred("role".into(), Box::new([Var("X".into())]));
         let ret = self.cur.query(&query).map(|x| match x {
             Pred(_, args) => match &args[0] {
@@ -319,15 +311,15 @@ impl GGP {
         }).collect();
         ret
     }
-    pub fn legal_moves_for(&self, r: &str) -> Vec<Expr> {
-        let query = Pred("legal".into(), Box::new([Atom(r.into()), Var("X".into())]));
+    pub fn legal_moves_for(&self, r: &Cow<'a, str>) -> Vec<Expr<'a>> {
+        let query = Pred("legal".into(), Box::new([Atom(r.clone()), Var("X".into())]));
         let ret = self.cur.query(&query).map(|x| match x { Pred(_, args) => args[1].clone(), _ => unreachable!() }).collect();
         ret
     }
-    pub fn play(&mut self, moves: &[(&str, Expr)]) {
+    pub fn play(&mut self, moves: &[(&Cow<'a, str>, Expr<'a>)]) {
         let mut db = replace(&mut self.cur, self.base.clone());
         for &(r, ref m) in moves.iter() {
-            db.add(Fact { cons: Pred("does".into(), Box::new([Atom(r.into()), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
+            db.add(Fact { cons: Pred("does".into(), Box::new([Atom(r.clone()), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
         }
         let next_query = Pred("next".into(), Box::new([Var("X".into())]));
         let mut nexts = db.query(&next_query).collect::<Vec<_>>();
@@ -343,7 +335,7 @@ impl GGP {
     pub fn is_done(&self) -> bool {
         self.cur.check(&Atom("terminal".into()))
     }
-    pub fn goals(&self) -> HashMap<String, u8> {
+    pub fn goals(&self) -> HashMap<Cow<'a, str>, u8> {
         let query = Pred("goal".into(), Box::new([Var("X".into()), Var("Y".into())]));
         let ret = self.cur.query(&query).map(|g| match g {
             Pred(_, args) => match (&args[0], &args[1]) {
@@ -362,10 +354,10 @@ mod tests {
     use super::Expr::*;
     use test::Bencher;
 
-    fn fact(cons: Expr, pos: Vec<Expr>, neg: Vec<Expr>, distinct: Vec<(Expr, Expr)>) -> Fact { Fact { cons: cons, pos: pos.into_boxed_slice(), neg: neg.into_boxed_slice(), distinct: distinct.into_boxed_slice() } }
-    fn pred(name: &str, args: Vec<Expr>) -> Expr { Pred(name.to_string(), args.into_boxed_slice()) }
-    fn atom(x: &str) -> Expr { Atom(x.to_string()) }
-    fn var(x: &str) -> Expr { Var(x.to_string()) }
+    fn fact<'a>(cons: Expr<'a>, pos: Vec<Expr<'a>>, neg: Vec<Expr<'a>>, distinct: Vec<(Expr<'a>, Expr<'a>)>) -> Fact<'a> { Fact { cons: cons, pos: pos.into_boxed_slice(), neg: neg.into_boxed_slice(), distinct: distinct.into_boxed_slice() } }
+    fn pred<'a>(name: &'a str, args: Vec<Expr<'a>>) -> Expr<'a> { Pred(name.into(), args.into_boxed_slice()) }
+    fn atom<'a>(x: &'a str) -> Expr<'a> { Atom(x.into()) }
+    fn var<'a>(x: &'a str) -> Expr<'a> { Var(x.into()) }
 
     #[test]
     fn atoms() {
@@ -451,14 +443,14 @@ mod tests {
                 let moves = roles.iter().map(|r| {
                     let all = ggp.legal_moves_for(r);
                     assert!(!all.is_empty());
-                    (r as &str, rng.choose(&all[..]).unwrap().clone())
+                    (r, rng.choose(&all[..]).unwrap().clone())
                 }).collect::<Vec<_>>();
                 ggp.play(&moves[..]);
             }
         });
     }
 
-    fn set_up_tic_tac_toe() -> DB {
+    fn set_up_tic_tac_toe() -> DB<'static> {
         // based on the example in http://games.stanford.edu/index.php/intro-to-gdl
         let mut db = DB::new();
 
@@ -468,12 +460,12 @@ mod tests {
         db.add(fact(pred("input", vec![var("R"), pred("mark", vec![var("M"), var("N")])]), vec![pred("role", vec![var("R")]), pred("index", vec![var("M")]), pred("index", vec![var("N")])], vec![], vec![]));
         db.add(fact(pred("input", vec![var("R"), atom("noop")]), vec![pred("role", vec![var("R")])], vec![], vec![]));
 
-        for i in 1..4 { db.add(fact(pred("index", vec![Atom(i.to_string())]), vec![], vec![], vec![])) }
+        for &i in ["1", "2", "3"].iter() { db.add(fact(pred("index", vec![Atom(i.into())]), vec![], vec![], vec![])) }
 
         for m in ["x", "o", "b"].iter() { db.add(fact(pred("base", vec![pred("cell", vec![var("M"), var("N"), atom(m)])]), vec![pred("index", vec![var("M")]), pred("index", vec![var("N")])], vec![], vec![])) }
         for r in roles.iter() { db.add(fact(pred("base", vec![pred("control", vec![atom(r)])]), vec![], vec![], vec![])) }
 
-        for x in 1..4 { for y in 1..4 { db.add(fact(pred("init", vec![pred("cell", vec![Atom(x.to_string()), Atom(y.to_string()), atom("b")])]), vec![], vec![], vec![])) } }
+        for &x in ["1", "2", "3"].iter() { for &y in ["1", "2", "3"].iter() { db.add(fact(pred("init", vec![pred("cell", vec![Atom(x.into()), Atom(y.into()), atom("b")])]), vec![], vec![], vec![])) } }
         db.add(fact(pred("init", vec![pred("control", vec![atom("x")])]), vec![], vec![], vec![]));
 
         db.add(fact(pred("legal", vec![var("W"), pred("mark", vec![var("X"), var("Y")])]),
@@ -546,16 +538,16 @@ mod tests {
             vec![]));
 
         db.add(fact(pred("row", vec![var("M"), var("X")]),
-            (1..4).map(|i| pred("true", vec![pred("cell", vec![var("M"), Atom(i.to_string()), var("X")])])).collect(),
+            ["1","2","3"].iter().map(|&i| pred("true", vec![pred("cell", vec![var("M"), Atom(i.into()), var("X")])])).collect(),
             vec![], vec![]));
         db.add(fact(pred("column", vec![var("M"), var("X")]),
-            (1..4).map(|i| pred("true", vec![pred("cell", vec![Atom(i.to_string()), var("M"), var("X")])])).collect(),
+            ["1","2","3"].iter().map(|&i| pred("true", vec![pred("cell", vec![Atom(i.into()), var("M"), var("X")])])).collect(),
             vec![], vec![]));
         db.add(fact(pred("diagonal", vec![var("X")]),
-            (1..4).map(|i| pred("true", vec![pred("cell", vec![Atom(i.to_string()), Atom(i.to_string()), var("X")])])).collect(),
+            ["1","2","3"].iter().map(|&i| pred("true", vec![pred("cell", vec![Atom(i.into()), Atom(i.into()), var("X")])])).collect(),
             vec![], vec![]));
         db.add(fact(pred("diagonal", vec![var("X")]),
-            (1..4).map(|i| pred("true", vec![pred("cell", vec![Atom(i.to_string()), Atom((4-i).to_string()), var("X")])])).collect(),
+            ["1","2","3"].iter().zip(["3","2","1"].iter()).map(|(&i, &j)| pred("true", vec![pred("cell", vec![Atom(i.into()), Atom(j.into()), var("X")])])).collect(),
             vec![], vec![]));
 
         db.add(fact(atom("terminal"), vec![pred("line", vec![var("W")]), pred("role", vec![var("W")])], vec![], vec![]));
