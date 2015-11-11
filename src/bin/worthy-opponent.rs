@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use worthy_opponent::ggp::{Expr, GGP, db_from_str};
 use std::hash::Hash;
 use std::fmt::Display;
-use std::borrow::Cow;
 
 #[derive(Debug)]
 struct MCTree<A: Eq + Hash, B: Eq + Hash> {
@@ -39,7 +38,7 @@ fn print_mc<A: Eq + Hash + Display, B: Eq + Hash>(mc: &MCTree<A, B>, chosen: Opt
     println!("");
 }
 
-fn choose_move<'a, 'b, T: Rng>(rng: &mut T, ggp: &GGP<'b>, role: &Cow<'b, str>, mc: &'a mut MCTree<Expr<'b>, Vec<Expr<'b>>>, explore: f64) -> (Expr<'b>, &'a mut MCTree<Vec<Expr<'b>>, Expr<'b>>) {
+fn choose_move<'a, 'b, T: Rng>(rng: &mut T, ggp: &GGP<'b>, role: &'b str, mc: &'a mut MCTree<Expr<'b>, Vec<Expr<'b>>>, explore: f64) -> (Expr<'b>, &'a mut MCTree<Vec<Expr<'b>>, Expr<'b>>) {
     if mc.children.is_empty() {
         let mvs = ggp.legal_moves_for(role);
         mc.children.reserve(mvs.len());
@@ -67,7 +66,7 @@ fn choose_move<'a, 'b, T: Rng>(rng: &mut T, ggp: &GGP<'b>, role: &Cow<'b, str>, 
     (mv, child)
 }
 
-fn tree_search<'a, T: Rng>(rng: &mut T, ggp: &mut GGP<'a>, mcs: &mut [(&Cow<'a, str>, &mut MCTree<Expr<'a>, Vec<Expr<'a>>>)]) -> HashMap<Cow<'a, str>, f64> {
+fn tree_search<'a, T: Rng>(rng: &mut T, ggp: &mut GGP<'a>, mcs: &mut [(&'a str, &mut MCTree<Expr<'a>, Vec<Expr<'a>>>)]) -> HashMap<&'a str, f64> {
     let result = if ggp.is_done() {
         println!("I found a terminal state!");
         ggp.goals().into_iter().map(|(k, v)| (k, v as f64)).collect()
@@ -98,7 +97,7 @@ fn tree_search<'a, T: Rng>(rng: &mut T, ggp: &mut GGP<'a>, mcs: &mut [(&Cow<'a, 
     result
 }
 
-fn play_out<'a, T: Rng>(rng: &mut T, ggp: &mut GGP<'a>, roles: &[&Cow<'a, str>]) -> HashMap<Cow<'a, str>, f64> {
+fn play_out<'a, T: Rng>(rng: &mut T, ggp: &mut GGP<'a>, roles: &[&'a str]) -> HashMap<&'a str, f64> {
     if ggp.is_done() {
         ggp.goals().into_iter().map(|(k, v)| (k, v as f64)).collect()
     } else {
@@ -123,7 +122,7 @@ fn main() {
         let ggp = GGP::from_rules(db_from_str(&body).unwrap());
         let mut mcs = ggp.roles().into_iter().map(|r| (r, MCTree::new())).collect::<Vec<_>>();
         for _ in 0.. {
-            tree_search(&mut rng, &mut ggp.clone(), &mut mcs.iter_mut().map(|&mut (ref r, ref mut mc)| (r, mc)).collect::<Vec<_>>()[..]);
+            tree_search(&mut rng, &mut ggp.clone(), &mut mcs.iter_mut().map(|&mut (r, ref mut mc)| (r, mc)).collect::<Vec<_>>()[..]);
             for &(ref r, ref mc) in mcs.iter() {
                 println!("For {}", r);
                 print_mc(mc, None);

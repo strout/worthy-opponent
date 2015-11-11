@@ -29,9 +29,9 @@ impl<'a> Display for Assignments<'a> {
 
 #[derive(Clone, Debug)]
 enum ValExpr<'a> {
-    Atom(Cow<'a, str>),
+    Atom(&'a str),
     Var(usize),
-    Pred(Cow<'a, str>, Box<[ValExpr<'a>]>)
+    Pred(&'a str, Box<[ValExpr<'a>]>)
 }
 
 impl<'a> Display for ValExpr<'a> {
@@ -52,9 +52,9 @@ impl<'a> Display for ValExpr<'a> {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Expr<'a> {
-    Atom(Cow<'a, str>),
+    Atom(&'a str),
     Var(Cow<'a, str>),
-    Pred(Cow<'a, str>, Box<[Expr<'a>]>)
+    Pred(&'a str, Box<[Expr<'a>]>)
 }
 
 impl<'a> Display for Expr<'a> {
@@ -230,7 +230,7 @@ impl<'a> Assignments<'a> {
 }
 
 #[derive(Clone)]
-pub struct DB<'a> { facts: HashMap<Cow<'a, str>, Vec<Fact<'a>>> }
+pub struct DB<'a> { facts: HashMap<&'a str, Vec<Fact<'a>>> }
 
 impl<'a> Display for DB<'a> {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
@@ -300,7 +300,7 @@ impl<'a> GGP<'a> {
         }
         GGP { base: base, cur: cur }
     }
-    pub fn roles(&self) -> Vec<Cow<'a, str>> {
+    pub fn roles(&self) -> Vec<&'a str> {
         let query = Pred("role".into(), Box::new([Var("X".into())]));
         let ret = self.cur.query(&query).map(|x| match x {
             Pred(_, args) => match &args[0] {
@@ -311,12 +311,12 @@ impl<'a> GGP<'a> {
         }).collect();
         ret
     }
-    pub fn legal_moves_for(&self, r: &Cow<'a, str>) -> Vec<Expr<'a>> {
+    pub fn legal_moves_for(&self, r: &'a str) -> Vec<Expr<'a>> {
         let query = Pred("legal".into(), Box::new([Atom(r.clone()), Var("X".into())]));
         let ret = self.cur.query(&query).map(|x| match x { Pred(_, args) => args[1].clone(), _ => unreachable!() }).collect();
         ret
     }
-    pub fn play(&mut self, moves: &[(&Cow<'a, str>, Expr<'a>)]) {
+    pub fn play(&mut self, moves: &[(&'a str, Expr<'a>)]) {
         let mut db = replace(&mut self.cur, self.base.clone());
         for &(r, ref m) in moves.iter() {
             db.add(Fact { cons: Pred("does".into(), Box::new([Atom(r.clone()), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
@@ -335,7 +335,7 @@ impl<'a> GGP<'a> {
     pub fn is_done(&self) -> bool {
         self.cur.check(&Atom("terminal".into()))
     }
-    pub fn goals(&self) -> HashMap<Cow<'a, str>, u8> {
+    pub fn goals(&self) -> HashMap<&'a str, u8> {
         let query = Pred("goal".into(), Box::new([Var("X".into()), Var("Y".into())]));
         let ret = self.cur.query(&query).map(|g| match g {
             Pred(_, args) => match (&args[0], &args[1]) {
@@ -440,7 +440,7 @@ mod tests {
             let mut ggp = ggp.clone();
             let roles = ggp.roles();
             while !ggp.is_done() {
-                let moves = roles.iter().map(|r| {
+                let moves = roles.iter().map(|&r| {
                     let all = ggp.legal_moves_for(r);
                     assert!(!all.is_empty());
                     (r, rng.choose(&all[..]).unwrap().clone())
