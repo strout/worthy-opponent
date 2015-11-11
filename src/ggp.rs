@@ -50,7 +50,7 @@ impl Display for ValExpr {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Expr {
     Atom(String),
     Var(String),
@@ -75,20 +75,30 @@ impl Display for Expr {
 
 type Parsed<'a, T> = Result<(T, &'a str), ()>;
 
+fn skip_comments(s: &str) -> &str {
+    let mut s = s.trim_left();
+    while s.starts_with(';') {
+        s = &s[s.find('\n').unwrap_or(s.len())..].trim_left();
+    }
+    s
+}
+
 fn parse_word(s: &str) -> Parsed<&str> {
-    let end = s.find(|c: char| c == '(' || c == ')' || c.is_whitespace()).unwrap_or(s.len());
+    let s = skip_comments(s);
+    let end = s.find(|c: char| c == '(' || c == ')' || c == ';' || c.is_whitespace()).unwrap_or(s.len());
     if end == 0 { Err(()) } else { Ok(s.split_at(end)) }
 }
 
 fn parse_expr(s: &str) -> Parsed<Expr> {
+    let s = skip_comments(s);
     if s.starts_with('(') {
-        let (head, rest) = try!(parse_word(s[1..].trim_left()));
-        let mut rest = rest.trim_left();
+        let (head, rest) = try!(parse_word(&s[1..]));
+        let mut rest = skip_comments(rest);
         let mut args = vec![];
         while !rest.starts_with(')') && !rest.is_empty() {
             let (arg, next) = try!(parse_expr(rest));
             args.push(arg);
-            rest = next.trim_left();
+            rest = skip_comments(next);
         }
         if rest.is_empty() { Err(()) } else { Ok((Pred(head.into(), args.into_boxed_slice()), &rest[1..])) }
     } else {
@@ -123,30 +133,38 @@ impl Display for Fact {
     }
 }
 
-fn parse_fact(s: &str) -> Parsed<Fact> {
+fn add_arg<'a, I: Iterator<Item=(Vec<Expr>, Vec<Expr>, Vec<(Expr, Expr)>)> + 'a>(sofar: I, arg: &'a Expr) -> Box<Iterator<Item=(Vec<Expr>, Vec<Expr>, Vec<(Expr, Expr)>)> + 'a> {
+    match arg {
+        &Pred(ref name, ref args) => match name as &str {
+            "not" => Box::new(sofar.map(move |(pos, mut neg, distinct)| { neg.push(args[0].clone()); (pos, neg, distinct) })),
+            "and" => Box::new(args.iter().fold(Box::new(sofar) as Box<Iterator<Item=_>>, add_arg)),
+            "or" => Box::new(sofar.flat_map(move |(pos, neg, distinct)| args.iter().flat_map(move |arg| add_arg(Box::new(once((pos.clone(), neg.clone(), distinct.clone()))), arg)))),
+            "distinct" => Box::new(sofar.map(move |(pos, neg, mut distinct)| { distinct.push((args[0].clone(), args[1].clone())); (pos, neg, distinct) })),
+            _ => Box::new(sofar.map(move |(mut pos, neg, distinct)| { pos.push(arg.clone()); (pos, neg, distinct) }))
+        },
+        _ => Box::new(sofar.map(move |(mut pos, neg, distinct)| { pos.push(arg.clone()); (pos, neg, distinct) }))
+    }
+}
+
+fn add_args<'a, I: Iterator<Item=&'a Expr>>(cons: &'a Expr, from: I) -> Box<Iterator<Item=Fact> + 'a> {
+    let base = Box::new(once((vec![], vec![], vec![]))) as Box<Iterator<Item=_>>;
+    let ret = from.fold(base, add_arg);
+    Box::new(ret.map(move |(pos, neg, distinct)| Fact { cons: cons.clone(), pos: pos.into_boxed_slice(), neg: neg.into_boxed_slice(), distinct: distinct.into_boxed_slice() }))
+}
+
+fn parse_fact(s: &str) -> Parsed<Vec<Fact>> {
     // TODO make this implementation less hacky -- right now it abuses parse_expr
     let (expr, rest) = try!(parse_expr(s));
     match expr {
         Var(_) => Err(()),
-        Atom(_) => Ok((Fact { cons: expr, pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }, rest)),
+        Atom(_) => Ok((vec![Fact { cons: expr, pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }], rest)),
         Pred(name, args) => {
             match &name as &str {
                 "<=" => {
                     let (head, body) = args.split_at(1);
-                    let (mut pos, mut neg, mut distinct) = (vec![], vec![], vec![]);
-                    for arg in body.iter() {
-                        match arg {
-                            &Pred(ref name, ref args) => match name as &str {
-                                "not" => neg.push(args[0].clone()),
-                                "distinct" => distinct.push((args[0].clone(), args[1].clone())),
-                                _ => pos.push(arg.clone())
-                            },
-                            _ => pos.push(arg.clone())
-                        }
-                    }
-                    Ok((Fact { cons: head[0].clone(), pos: pos.into_boxed_slice(), neg: neg.into_boxed_slice(), distinct: distinct.into_boxed_slice() }, rest))
+                    Ok((add_args(&head[0], body.iter()).collect(), rest))
                 },
-                _ => Ok((Fact { cons: Pred(name, args), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }, rest))
+                _ => Ok((vec![Fact { cons: Pred(name, args), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }], rest))
             }
         }
     }
@@ -223,9 +241,10 @@ impl Display for DB {
 
 fn parse_db(mut s: &str) -> Parsed<DB> {
     let mut db = DB::new();
-    while let Ok((f, rest)) = parse_fact(s.trim_left()) {
-        db.add(f);
-        s = rest;
+    s = skip_comments(s);
+    while let Ok((fs, rest)) = parse_fact(s) {
+        for f in fs { db.add(f) }
+        s = skip_comments(rest);
     }
     Ok((db, s))
 }
@@ -305,10 +324,10 @@ impl GGP {
         let ret = self.cur.query(&query).map(|x| match x { Pred(_, args) => args[1].clone(), _ => unreachable!() }).collect();
         ret
     }
-    pub fn play(&mut self, moves: &[(String, Expr)]) {
+    pub fn play(&mut self, moves: &[(&str, Expr)]) {
         let mut db = replace(&mut self.cur, self.base.clone());
-        for &(ref r, ref m) in moves.iter() {
-            db.add(Fact { cons: Pred("does".into(), Box::new([Atom(r.clone()), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
+        for &(r, ref m) in moves.iter() {
+            db.add(Fact { cons: Pred("does".into(), Box::new([Atom(r.into()), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
         }
         let next_query = Pred("next".into(), Box::new([Var("X".into())]));
         let mut nexts = db.query(&next_query).collect::<Vec<_>>();
