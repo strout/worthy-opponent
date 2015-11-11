@@ -360,6 +360,7 @@ impl GGP {
 mod tests {
     use super::*;
     use super::Expr::*;
+    use test::Bencher;
 
     fn fact(cons: Expr, pos: Vec<Expr>, neg: Vec<Expr>, distinct: Vec<(Expr, Expr)>) -> Fact { Fact { cons: cons, pos: pos.into_boxed_slice(), neg: neg.into_boxed_slice(), distinct: distinct.into_boxed_slice() } }
     fn pred(name: &str, args: Vec<Expr>) -> Expr { Pred(name.to_string(), args.into_boxed_slice()) }
@@ -435,22 +436,26 @@ mod tests {
         // assert_eq!(10, db.query(&next_query).count()); // This would pass if results had no duplicates. (Should they?)
     }
 
-    #[test]
-    fn tic_tac_toe_playthrough() {
+    #[bench]
+    fn tic_tac_toe_playthrough(bench: &mut Bencher) {
         use rand::{weak_rng, Rng};
 
         let mut rng = weak_rng();
-        let mut ggp = GGP::from_rules(set_up_tic_tac_toe());
+        let ggp = GGP::from_rules(set_up_tic_tac_toe());
 
         assert!(!ggp.is_done());
-        while !ggp.is_done() {
-            let moves = ggp.roles().into_iter().map(|r| {
-                let all = ggp.legal_moves_for(&r);
-                assert!(!all.is_empty());
-                (r, rng.choose(&all[..]).unwrap().clone())
-            }).collect::<Vec<_>>();
-            ggp.play(&moves[..]);
-        }
+        bench.iter(|| {
+            let mut ggp = ggp.clone();
+            let roles = ggp.roles();
+            while !ggp.is_done() {
+                let moves = roles.iter().map(|r| {
+                    let all = ggp.legal_moves_for(r);
+                    assert!(!all.is_empty());
+                    (r as &str, rng.choose(&all[..]).unwrap().clone())
+                }).collect::<Vec<_>>();
+                ggp.play(&moves[..]);
+            }
+        });
     }
 
     fn set_up_tic_tac_toe() -> DB {
