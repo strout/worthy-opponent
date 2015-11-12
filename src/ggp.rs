@@ -4,7 +4,7 @@ use std::iter::*;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Error};
 use std::result::Result;
-use self::Expr::*;
+pub use self::Expr::*;
 use self::{ValExpr as V};
 use std::mem::replace;
 use std::borrow::Cow;
@@ -73,7 +73,7 @@ impl<'a> Display for Expr<'a> {
     }
 }
 
-type Parsed<'a, T> = Result<(T, &'a str), ()>;
+pub type Parsed<'a, T> = Result<(T, &'a str), ()>;
 
 fn skip_comments(s: &str) -> &str {
     let mut s = s.trim_left();
@@ -89,7 +89,7 @@ fn parse_word(s: &str) -> Parsed<&str> {
     if end == 0 { Err(()) } else { Ok(s.split_at(end)) }
 }
 
-fn parse_expr(s: &str) -> Parsed<Expr> {
+pub fn parse_expr(s: &str) -> Parsed<Expr> {
     let s = skip_comments(s);
     if s.starts_with('(') {
         let (head, rest) = try!(parse_word(&s[1..]));
@@ -152,7 +152,7 @@ fn add_args<'a, 'b, I: Iterator<Item=&'a Expr<'b>>>(cons: &'a Expr<'b>, from: I)
     Box::new(ret.map(move |(pos, neg, distinct)| Fact { cons: cons.clone(), pos: pos.into_boxed_slice(), neg: neg.into_boxed_slice(), distinct: distinct.into_boxed_slice() }))
 }
 
-fn parse_fact(s: &str) -> Parsed<Vec<Fact>> {
+pub fn parse_fact(s: &str) -> Parsed<Vec<Fact>> {
     // TODO make this implementation less hacky -- right now it abuses parse_expr
     let (expr, rest) = try!(parse_expr(s));
     match expr {
@@ -239,7 +239,7 @@ impl<'a> Display for DB<'a> {
     }
 }
 
-fn parse_db(mut s: &str) -> Parsed<DB> {
+pub fn parse_db(mut s: &str) -> Parsed<DB> {
     let mut db = DB::new();
     s = skip_comments(s);
     while let Ok((fs, rest)) = parse_fact(s) {
@@ -258,7 +258,7 @@ impl<'a> DB<'a> {
     pub fn query<'b>(&'b self, expr: &'b Expr<'a>) -> Box<Iterator<Item=Expr<'a>> + 'b> {
         Box::new(self.query_inner(expr, Assignments::new(), None).map(move |mut asg| { let val = asg.to_val(expr, None); asg.from_val(&val) }))
     }
-    pub fn check(&self, e: &Expr<'a>) -> bool {
+    pub fn check(&self, e: &Expr) -> bool {
         self.query(e).next().is_some()
     }
     pub fn add(&mut self, f: Fact<'a>) {
@@ -269,7 +269,7 @@ impl<'a> DB<'a> {
         e.or_insert(vec![]).push(f)
     }
     fn query_inner<'b>(&'b self, expr: &'b Expr<'a>, asg: Assignments<'a>, depth: Option<usize>) -> Box<Iterator<Item=Assignments<'a>> + 'b> {
-        let relevant : Box<Iterator<Item=&'b Vec<Fact<'a>>> + 'b> = match expr {
+        let relevant : Box<Iterator<Item=&'b Vec<Fact>> + 'b> = match expr {
             &Var(_) => Box::new(self.facts.values()),
             &Atom(ref n) | &Pred(ref n, _) => Box::new(self.facts.get(n).into_iter())
         };
@@ -301,14 +301,14 @@ impl<'a> GGP<'a> {
         GGP { base: base, cur: cur }
     }
     pub fn roles(&self) -> Vec<&'a str> {
-        let query = Pred("role".into(), Box::new([Var("X".into())]));
-        let ret = self.cur.query(&query).map(|x| match x {
+        let query: Expr<'a> = Pred("role".into(), Box::new([Var("X".into())]));
+        let ret = { self.cur.query(&query).map(|x| match x {
             Pred(_, args) => match &args[0] {
                 &Atom(ref s) => s.clone(),
                 _ => unreachable!()
             },
             _ => unreachable!()
-        }).collect();
+        }).collect() };
         ret
     }
     pub fn legal_moves_for(&self, r: &'a str) -> Vec<Expr<'a>> {
@@ -316,7 +316,7 @@ impl<'a> GGP<'a> {
         let ret = self.cur.query(&query).map(|x| match x { Pred(_, args) => args[1].clone(), _ => unreachable!() }).collect();
         ret
     }
-    pub fn play(&mut self, moves: &[(&'a str, Expr<'a>)]) {
+    pub fn play<'b>(&mut self, moves: &[(&'a str, Expr<'a>)]) where 'a {
         let mut db = replace(&mut self.cur, self.base.clone());
         for &(r, ref m) in moves.iter() {
             db.add(Fact { cons: Pred("does".into(), Box::new([Atom(r.clone()), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
