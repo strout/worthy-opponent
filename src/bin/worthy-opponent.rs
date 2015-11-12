@@ -247,7 +247,7 @@ fn run_match(desc: String, recvmvs: Receiver<String>, sendreply: Sender<String>)
 }
 
 fn main() {
-    let srv = ServerBuilder::new().with_port(64335).build().unwrap();
+    let srv = ServerBuilder::new().with_port(if cfg!(debug_assertions) { 64335 } else { 9147 }).build().unwrap();
     let mut ongoing = HashMap::new();
     let mut body = String::new();
     for mut req in srv.incoming_requests() {
