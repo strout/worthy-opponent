@@ -89,20 +89,61 @@ fn parse_word(s: &str) -> Parsed<&str> {
     if end == 0 { Err(()) } else { Ok(s.split_at(end)) }
 }
 
-pub fn parse_expr(s: &str) -> Parsed<Expr> {
+pub enum SExpr<'a> {
+    Atom(&'a str),
+    List(Vec<SExpr<'a>>)
+}
+
+impl<'a> SExpr<'a> {
+    pub fn as_str(&self) -> Option<&'a str> {
+        match self {
+            &SExpr::Atom(s) => Some(s),
+            _ => None
+        }
+    }
+    pub fn as_list(&self) -> Option<&[SExpr<'a>]> {
+        match self {
+            &SExpr::List(ref list) => Some(&list[..]),
+            _ => None
+        }
+    }
+}
+
+pub fn parse_sexpr(s: &str) -> Parsed<SExpr> {
     let s = skip_comments(s);
     if s.starts_with('(') {
-        let (head, rest) = try!(parse_word(&s[1..]));
-        let mut rest = skip_comments(rest);
+        let mut rest = skip_comments(&s[1..]);
         let mut args = vec![];
         while !rest.starts_with(')') && !rest.is_empty() {
-            let (arg, next) = try!(parse_expr(rest));
+            let (arg, next) = try!(parse_sexpr(rest));
             args.push(arg);
             rest = skip_comments(next);
         }
-        if rest.is_empty() { Err(()) } else { Ok((Pred(head.into(), args.into_boxed_slice()), &rest[1..])) }
+        if rest.is_empty() { Err(()) } else { Ok((SExpr::List(args), &rest[1..])) }
     } else {
-        parse_word(s).map(|(s, r)| (if s.starts_with('?') { Var(s[1..].into()) } else { Atom(s.into()) }, r))
+        parse_word(s).map(|(s, r)| (SExpr::Atom(s), r))
+    }
+}
+
+pub fn sexpr_to_expr<'a>(sexpr: &SExpr<'a>) -> Option<Expr<'a>> {
+    match sexpr {
+        &SExpr::Atom(s) => Some(if s.starts_with('?') { Var(s[1..].into()) } else { Atom(s) }),
+        &SExpr::List(ref args) => if args.is_empty() {
+            None
+        } else {
+            let name = match &args[0] {
+                &SExpr::Atom(s) => s,
+                _ => return None
+            };
+            let mut pred_args = Vec::with_capacity(args.len() - 1);
+            for arg in args.iter().skip(1) {
+                match sexpr_to_expr(arg) {
+                    None => return None,
+                    Some(x) => pred_args.push(x)
+                }
+            }
+            Some(Pred(name, pred_args.into_boxed_slice()))
+        }
     }
 }
 
@@ -152,19 +193,18 @@ fn add_args<'a, 'b, I: Iterator<Item=&'a Expr<'b>>>(cons: &'a Expr<'b>, from: I)
     Box::new(ret.map(move |(pos, neg, distinct)| Fact { cons: cons.clone(), pos: pos.into_boxed_slice(), neg: neg.into_boxed_slice(), distinct: distinct.into_boxed_slice() }))
 }
 
-pub fn parse_fact(s: &str) -> Parsed<Vec<Fact>> {
-    // TODO make this implementation less hacky -- right now it abuses parse_expr
-    let (expr, rest) = try!(parse_expr(s));
+fn expr_to_fact<'a>(expr: Expr<'a>) -> Option<Vec<Fact<'a>>> {
+    // TODO make this implementation less hacky -- right now it relies on Exprs instead of SExprs
     match expr {
-        Var(_) => Err(()),
-        Atom(_) => Ok((vec![Fact { cons: expr, pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }], rest)),
+        Var(_) => None,
+        Atom(_) => Some(vec![Fact { cons: expr, pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }]),
         Pred(name, args) => {
             match &name as &str {
                 "<=" => {
                     let (head, body) = args.split_at(1);
-                    Ok((add_args(&head[0], body.iter()).collect(), rest))
+                    Some(add_args(&head[0], body.iter()).collect())
                 },
-                _ => Ok((vec![Fact { cons: Pred(name, args), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }], rest))
+                _ => Some(vec![Fact { cons: Pred(name, args), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }])
             }
         }
     }
@@ -239,18 +279,23 @@ impl<'a> Display for DB<'a> {
     }
 }
 
-pub fn parse_db(mut s: &str) -> Parsed<DB> {
-    let mut db = DB::new();
-    s = skip_comments(s);
-    while let Ok((fs, rest)) = parse_fact(s) {
-        for f in fs { db.add(f) }
-        s = skip_comments(rest);
+pub fn sexpr_to_db<'a>(sexpr: &SExpr<'a>) -> Option<DB<'a>> {
+    match sexpr {
+        &SExpr::Atom(_) => return None,
+        &SExpr::List(ref list) => {
+            let mut db = DB::new();
+            for sexpr in list.iter() {
+                match sexpr_to_expr(sexpr) {
+                    None => return None,
+                    Some(expr) => match expr_to_fact(expr) {
+                        None => return None,
+                        Some(fs) => for f in fs { db.add(f) }
+                    }
+                }
+            }
+            Some(db)
+        }
     }
-    Ok((db, s))
-}
-
-pub fn db_from_str(s: &str) -> Result<DB, ()> {
-    parse_db(s).map(|x| x.0)
 }
 
 impl<'a> DB<'a> {

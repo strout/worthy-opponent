@@ -6,10 +6,9 @@ extern crate thread_scoped;
 use tiny_http::{ServerBuilder, Response, Header};
 use rand::{Rng, weak_rng};
 use std::collections::HashMap;
-use worthy_opponent::ggp::{Expr, Var, Atom, Pred, DB, GGP, parse_db, parse_expr, Parsed};
+use worthy_opponent::ggp::{Expr, Var, Atom, Pred, DB, GGP, SExpr, sexpr_to_db, sexpr_to_expr, parse_sexpr};
 use std::hash::Hash;
 use std::fmt::Display;
-use std::result::Result;
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 use thread_scoped::scoped;
 use std::thread::{spawn, sleep_ms};
@@ -126,57 +125,24 @@ enum Message<'a> {
     Abort(&'a str)
 }
 
-fn parse_exprs(mut s: &str) -> Parsed<Vec<Expr>> {
-    let mut ret = vec![];
-    s = &s.trim_left()[1..];
-    loop {
-        s = s.trim_left();
-        if s.starts_with(')') { return Ok((ret, s)); }
-        let (expr, rest) = try!(parse_expr(s).map_err(|_| println!("Bad expr with {}", s)));
-        ret.push(expr);
-        s = rest;
-    }
-}
-
-fn parse_message(s: &str) -> Result<Message, ()> {
-    let s = s.trim();
-    Ok(
-        if s == "(info)" { Message::Info }
-        else if s.starts_with("(preview") {
-            let (db, rest) = try!(parse_db(&s[8..]));
-            let rest = rest.trim_left();
-            let clock = try!(rest[..rest.len() - 1].parse().map_err(|_| ()));
-            Message::Preview(db, clock)
-        } else if s.starts_with("(start") {
-            let rest = &s[6..].trim_left();
-            let (id, rest) = rest.split_at(rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len()));
-            let rest = rest.trim_left();
-            let (role, rest) = rest.split_at(rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len()));
-            let rest = rest.trim_left();
-            let (db, rest) = try!(parse_db(&rest[1..]).map_err(|_| println!("\n\nDB parse failed for\n\n{}\n\n", rest)));
-            let rest = rest[1..].trim_left();
-            let (start_clock, rest) = rest.split_at(rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len()));
-            let play_clock = rest[..rest.len() - 1].trim();
-            Message::Start(id, role, db, try!(start_clock.parse().map_err(|err| println!("Bad start_clock: {} ({})", start_clock, err))), try!(play_clock.parse().map_err(|err| println!("Bad play_clock: {} ({})", play_clock, err))))
-        } else if s.starts_with("(play") {
-            let rest = &s[5..].trim_left();
-            let (id, rest) = rest.split_at(rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len()));
-            let rest = rest.trim_left();
-            if rest.starts_with("nil") {
-                Message::Play(id, vec![])
-            } else {
-                let (mvs, _) = try!(parse_exprs(rest));
-                Message::Play(id, mvs)
-            }
-        } else if s.starts_with("(stop") {
-            let rest = &s[5..].trim_left();
-            let (id, rest) = rest.split_at(rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len()));
-            let (mvs, _) = try!(parse_exprs(rest));
-            Message::Stop(id, mvs)
-        } else if s.starts_with("(abort") {
-            Message::Abort(s[6..s.len() - 1].trim())
-        } else { return Err(()) }
-    )
+fn parse_message(s: &str) -> Option<Message> {
+    parse_sexpr(s).ok().and_then(|(sexpr, _)| sexpr.as_list().and_then(|list| list[0].as_str().and_then(|name| match name {
+        "info" => Some(Message::Info),
+        "preview" => sexpr_to_db(&list[1]).and_then(|db| list[2].as_str().and_then(|s| s.parse().ok().map(|clock| Message::Preview(db, clock)))),
+        "start" => list[1].as_str().and_then(|id| list[2].as_str().and_then(|role| sexpr_to_db(&list[3]).and_then(|db| list[4].as_str().and_then(|s| s.parse().ok().and_then(|start_clock| list[5].as_str().and_then(|s| s.parse().ok().map(|play_clock| Message::Start(id, role, db, start_clock, play_clock)))))))),
+        "play" => list[1].as_str().and_then(|id| match list[2] {
+            SExpr::Atom("nil") => Some(Message::Play(id, vec![])),
+            SExpr::Atom(_) => None,
+            SExpr::List(ref list) => Some(Message::Play(id, list.iter().flat_map(|sexpr| sexpr_to_expr(sexpr)).collect()))
+        }),
+        "stop" => list[1].as_str().and_then(|id| match list[2] {
+            SExpr::Atom("nil") => Some(Message::Stop(id, vec![])),
+            SExpr::Atom(_) => None,
+            SExpr::List(ref list) => Some(Message::Stop(id, list.iter().flat_map(|sexpr| sexpr_to_expr(sexpr)).collect()))
+        }),
+        "abort" => list[1].as_str().map(|id| Message::Abort(id)),
+        _ => None
+    })))
 }
 
 fn same(l: &Expr, r: &Expr) -> bool {
@@ -197,7 +163,7 @@ fn think<'a>(role: &'a str, mut ggp: GGP<'a>, recvmvs: Receiver<Option<String>>,
             Err(TryRecvError::Empty) => {},
             Err(TryRecvError::Disconnected) => return,
             Ok(Some(mvs)) => {
-                if let Ok(Message::Play(_, mvs)) = parse_message(&mvs) {
+                if let Some(Message::Play(_, mvs)) = parse_message(&mvs) {
                     for mv in mvs.iter() { println!("{}", mv) }
                     let mvs = roles.iter().cloned().zip(mvs.into_iter()) // TODO this is a hack because I need the right lifteime for the moves.
                         .map(|(r, mv)| {
@@ -227,7 +193,7 @@ fn think<'a>(role: &'a str, mut ggp: GGP<'a>, recvmvs: Receiver<Option<String>>,
 }
 
 fn run_match(desc: String, recvmvs: Receiver<String>, sendreply: Sender<String>) {
-    if let Ok(Message::Start(id, role, db, _, play_clock)) = parse_message(&desc) {
+    if let Some(Message::Start(id, role, db, _, play_clock)) = parse_message(&desc) {
         let ggp = GGP::from_rules(db);
         let (sendmovexprs, recvmovexprs) = channel();
         let (sendreplies, recvreplies) = channel();
@@ -253,23 +219,24 @@ fn main() {
     for mut req in srv.incoming_requests() {
         body.clear();
         req.as_reader().read_to_string(&mut body).unwrap();
+        let body = body.to_lowercase();
         println!("Got: [[\n{}\n]]", body);
         match parse_message(&body) {
-            Ok(Message::Info) => req.respond(Response::from_data("available").with_header(Header::from_bytes("Content-Type", "text/acl").unwrap())),
-            Ok(Message::Preview(_, _)) => req.respond(Response::from_data("ready").with_header(Header::from_bytes("Content-Type", "text/acl").unwrap())),
-            Ok(Message::Start(id, _, _, _, _)) => {
+            Some(Message::Info) => req.respond(Response::from_data("available").with_header(Header::from_bytes("Content-Type", "text/acl").unwrap())),
+            Some(Message::Preview(_, _)) => req.respond(Response::from_data("ready").with_header(Header::from_bytes("Content-Type", "text/acl").unwrap())),
+            Some(Message::Start(id, _, _, _, _)) => {
                 let (sendmvs, recvmvs) = channel();
                 let (sendreply, recvreply) = channel();
                 ongoing.insert(id.to_string(), (sendmvs, recvreply));
                 let desc = body.clone();
                 spawn(move || run_match(desc, recvmvs, sendreply));
             },
-            Ok(Message::Play(id, _)) => if let Some(&mut (ref mut sendmvs, ref mut recvreply)) = ongoing.get_mut(id) {
+            Some(Message::Play(id, _)) => if let Some(&mut (ref mut sendmvs, ref mut recvreply)) = ongoing.get_mut(id) {
                 sendmvs.send(body.clone()).unwrap();
                 req.respond(Response::from_data(recvreply.recv().unwrap()).with_header(Header::from_bytes("Content-Type", "text/acl").unwrap()))
             } else { println!("Asked to play in unknown match {}", id) },
-            Ok(Message::Stop(id, _)) | Ok(Message::Abort(id)) => { ongoing.remove(id); },
-            _ => { println!("Bad request: {}", body); req.respond(Response::from_string("dunno-lol").with_status_code(400)) }
+            Some(Message::Stop(id, _)) | Some(Message::Abort(id)) => { ongoing.remove(id); },
+            None => { println!("Bad request: {}", body); req.respond(Response::from_string("dunno-lol").with_status_code(400)) }
         }
     }
 }
