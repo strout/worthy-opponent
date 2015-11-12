@@ -89,7 +89,7 @@ fn tree_search<'a, T: Rng>(rng: &mut T, ggp: &mut GGP<'a>, mcs: &mut [(&'a str, 
             play_out(rng, ggp, &mcs.iter().map(|&(r, _)| r).collect::<Vec<_>>()[..])
         };
         for (_, res) in result.iter_mut() {
-            *res *= 0.99;
+            *res *= 0.99999;
         }
         result
     };
@@ -110,7 +110,7 @@ fn play_out<'a, T: Rng>(rng: &mut T, ggp: &mut GGP<'a>, roles: &[&'a str]) -> Ha
         ggp.play(&moves[..]);
         let mut result = play_out(rng, ggp, roles);
         for (_, res) in result.iter_mut() {
-            *res = *res * 0.99;
+            *res = *res * 0.99999;
         }
         result
     }
