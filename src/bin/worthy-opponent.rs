@@ -165,9 +165,10 @@ fn think<'a>(role: &'a str, mut ggp: GGP<'a>, recvmvs: Receiver<Option<String>>,
             Ok(Some(mvs)) => {
                 if let Some(Message::Play(_, mvs)) = parse_message(&mvs) {
                     for mv in mvs.iter() { println!("{}", mv) }
+                    let legals = mcs.iter().map(|&(r, ref mc)| (r, if mc.children.is_empty() { ggp.legal_moves_for(r) } else { mc.children.keys().cloned().collect() })).collect::<HashMap<_, _>>();
                     let mvs = roles.iter().cloned().zip(mvs.into_iter()) // TODO this is a hack because I need the right lifteime for the moves.
                         .map(|(r, mv)| {
-                            let mv = ggp.legal_moves_for(r).into_iter().find(|x| same(x, &mv)).unwrap();
+                            let mv = legals[r].iter().find(|x| same(x, &mv)).unwrap().clone();
                             (r, mv)
                         }).collect::<Vec<_>>();
                     let just_mvs = mvs.iter().map(|&(_, ref mv)| mv).cloned().collect::<Vec<_>>();
