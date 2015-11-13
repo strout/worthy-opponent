@@ -42,7 +42,7 @@ fn print_mc<A: Eq + Hash + Display, B: Eq + Hash>(mc: &MCTree<A, B>, chosen: Opt
     println!("");
 }
 
-fn choose_move<'a, 'b, T: Rng>(rng: &mut T, ggp: &GGP<'b>, role: usize, mc: &'a mut MCTree<IExpr, Vec<IExpr>>, explore: f64) -> (IExpr, &'a mut MCTree<Vec<IExpr>, IExpr>) {
+fn choose_move<'a, T: Rng>(rng: &mut T, ggp: &GGP, role: usize, mc: &'a mut MCTree<IExpr, Vec<IExpr>>, explore: f64) -> (IExpr, &'a mut MCTree<Vec<IExpr>, IExpr>) {
     if mc.children.is_empty() {
         let mvs = ggp.legal_moves_for(role);
         mc.children.reserve(mvs.len());
@@ -145,7 +145,7 @@ fn parse_message(s: &str) -> Option<Message> {
     })))
 }
 
-fn think(role: usize, mut ggp: GGP, recvmvs: Receiver<Option<String>>, sendreplies: Sender<IExpr>) {
+fn think(role: usize, mut ggp: GGP, recvmvs: Receiver<Option<Vec<IExpr>>>, sendreplies: Sender<IExpr>) {
     let roles = ggp.roles();
     let mut mcs = roles.iter().map(|&r| (r, MCTree::new())).collect::<Vec<_>>();
     let mut rng = weak_rng();
@@ -154,16 +154,13 @@ fn think(role: usize, mut ggp: GGP, recvmvs: Receiver<Option<String>>, sendrepli
             Err(TryRecvError::Empty) => {},
             Err(TryRecvError::Disconnected) => return,
             Ok(Some(mvs)) => {
-                if let Some(Message::Play(_, mvs)) = parse_message(&mvs) {
-                    for mv in mvs.iter() { println!("{}", mv) }
-                    let mvs = roles.iter().cloned().zip(mvs.into_iter().map(|mv| mv.try_thru(&ggp.labeler).unwrap())).collect::<Vec<_>>();
-                    let just_mvs = mvs.iter().map(|&(_, ref mv)| mv).cloned().collect::<Vec<_>>();
-                    for (&mut (_, ref mut mc), &(_, ref mv)) in mcs.iter_mut().zip(mvs.iter()) {
-                        // print_mc(mc, Some(mv));
-                        *mc = mc.children.remove(mv).and_then(|mut mc| mc.children.remove(&just_mvs)).unwrap_or(MCTree::new());
-                    }
-                    if !mvs.is_empty() { ggp.play(&mvs[..]) }
-                };
+                let mvs = roles.iter().cloned().zip(mvs).collect::<Vec<_>>();
+                let just_mvs = mvs.iter().map(|&(_, ref mv)| mv).cloned().collect::<Vec<_>>();
+                for (&mut (_, ref mut mc), &(_, ref mv)) in mcs.iter_mut().zip(mvs.iter()) {
+                    // print_mc(mc, Some(mv));
+                    *mc = mc.children.remove(mv).and_then(|mut mc| mc.children.remove(&just_mvs)).unwrap_or(MCTree::new());
+                }
+                if !mvs.is_empty() { ggp.play(&mvs[..]) }
             },
             Ok(None) => {
                 for &mut (r, ref mut mc) in mcs.iter_mut() {
@@ -183,16 +180,18 @@ fn run_match(desc: String, recvmvs: Receiver<String>, sendreply: Sender<String>)
     if let Some(Message::Start(id, role, db, _, play_clock)) = parse_message(&desc) {
         let (db, labeler) = sexpr_to_db(&db).unwrap();
         let role = labeler.check(role).unwrap();
-        let ggp = GGP::from_rules(db, labeler.clone()).unwrap();
+        let ggp = GGP::from_rules(db, &labeler).unwrap();
         let (sendmovexprs, recvmovexprs) = channel();
         let (sendreplies, recvreplies) = channel();
         let handle = unsafe { scoped(move || think(role, ggp, recvmovexprs, sendreplies)) };
         println!("Match {} ready.", id);
         while let Ok(mvs) = recvmvs.recv() {
-            sendmovexprs.send(Some(mvs)).unwrap();
-            sleep_ms(play_clock * 1000 - 500);
-            sendmovexprs.send(None).unwrap();
-            sendreply.send(recvreplies.recv().unwrap().thru(&labeler).unwrap().to_string()).unwrap();
+            if let Some(Message::Play(_, mvs)) = parse_message(&mvs) {
+                sendmovexprs.send(Some(mvs.iter().map(|mv| mv.try_thru(&labeler).unwrap()).collect())).unwrap();
+                sleep_ms(play_clock * 1000 - 500);
+                sendmovexprs.send(None).unwrap();
+                sendreply.send(recvreplies.recv().unwrap().thru(&labeler).unwrap().to_string()).unwrap();
+            }
         }
         println!("Match {} shutting down.", id);
         drop(sendmovexprs);

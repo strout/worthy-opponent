@@ -10,6 +10,7 @@ use std::mem::replace;
 use std::borrow::Cow;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::usize;
 
 #[derive(Clone)]
 pub struct Labeler<'a> {
@@ -20,16 +21,29 @@ pub struct Labeler<'a> {
 impl<'a> Labeler<'a> {
     pub fn new() -> Labeler<'a> { Labeler { to: HashMap::new(), from: vec![] } }
     pub fn put(&mut self, s: &'a str) -> usize {
+        match s.parse::<u8>() {
+            Ok(x) => return usize::MAX - x as usize,
+            Err(_) => {}
+        }
         let f = &mut self.from;
         *self.to.entry(s).or_insert_with(|| { f.push(s); f.len() - 1 })
     }
     pub fn get(&self, i: usize) -> Option<&'a str> {
+        if i > usize::MAX - 256 {
+            return Some(HACKY_HACK[usize::MAX - i]);
+        }
         self.from.get(i).cloned()
     }
     pub fn check(&self, s: &str) -> Option<usize> {
+        match s.parse::<u8>() {
+            Ok(x) => return Some(usize::MAX - x as usize),
+            Err(_) => {}
+        }
         self.to.get(s).cloned()
     }
 }
+
+const HACKY_HACK : [&'static str; 256] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95", "96", "97", "98", "99", "100", "101", "102", "103", "104", "105", "106", "107", "108", "109", "110", "111", "112", "113", "114", "115", "116", "117", "118", "119", "120", "121", "122", "123", "124", "125", "126", "127", "128", "129", "130", "131", "132", "133", "134", "135", "136", "137", "138", "139", "140", "141", "142", "143", "144", "145", "146", "147", "148", "149", "150", "151", "152", "153", "154", "155", "156", "157", "158", "159", "160", "161", "162", "163", "164", "165", "166", "167", "168", "169", "170", "171", "172", "173", "174", "175", "176", "177", "178", "179", "180", "181", "182", "183", "184", "185", "186", "187", "188", "189", "190", "191", "192", "193", "194", "195", "196", "197", "198", "199", "200", "201", "202", "203", "204", "205", "206", "207", "208", "209", "210", "211", "212", "213", "214", "215", "216", "217", "218", "219", "220", "221", "222", "223", "224", "225", "226", "227", "228", "229", "230", "231", "232", "233", "234", "235", "236", "237", "238", "239", "240", "241", "242", "243", "244", "245", "246", "247", "248", "249", "250", "251", "252", "253", "254", "255"];
 
 #[derive(Clone, Debug)]
 struct Assignments {
@@ -380,21 +394,52 @@ impl DB {
 }
 
 #[derive(Clone)]
-pub struct GGP<'a> {
+pub struct GGP {
     base: DB,
     cur: DB,
-    pub labeler: Labeler<'a>
+    tru: usize,
+    role: usize,
+    legal: usize,
+    does: usize,
+    next: usize,
+    terminal: usize,
+    goal: usize
 }
 
-impl<'a> GGP<'a> {
-    pub fn from_rules(base: DB, mut labeler: Labeler<'a>) -> Option<GGP<'a>> {
+impl GGP {
+    pub fn from_rules(base: DB, labeler: &Labeler) -> Option<GGP> {
         let mut cur = base.clone();
-        let init_query = match Pred("init".into(), Box::new([Var("X".into())])).try_thru(&mut labeler) {
-            Some(q) => q,
+        let init = match labeler.check("init") {
+            Some(x) => x,
             None => return None
         };
+        let init_query = IExpr::Pred(init, Box::new([IExpr::Var(0)]));
         let tru = match labeler.check("true") {
-            Some(t) => t,
+            Some(x) => x,
+            None => return None
+        };
+        let role = match labeler.check("role") {
+            Some(x) => x,
+            None => return None
+        };
+        let legal = match labeler.check("legal") {
+            Some(x) => x,
+            None => return None
+        };
+        let does = match labeler.check("does") {
+            Some(x) => x,
+            None => return None
+        };
+        let next = match labeler.check("next") {
+            Some(x) => x,
+            None => return None
+        };
+        let terminal = match labeler.check("terminal") {
+            Some(x) => x,
+            None => return None
+        };
+        let goal = match labeler.check("goal") {
+            Some(x) => x,
             None => return None
         };
         for init in base.query(&init_query) {
@@ -403,11 +448,10 @@ impl<'a> GGP<'a> {
                 _ => unreachable!()
             }
         }
-        Some(GGP { base: base, cur: cur, labeler: labeler })
+        Some(GGP { base: base, cur: cur, tru: tru, role: role, legal: legal, does: does, next: next, terminal: terminal, goal: goal })
     }
     pub fn roles(&self) -> Vec<usize> {
-        let role = self.labeler.check("role").unwrap();
-        let query = IExpr::Pred(role, Box::new([IExpr::Var(0)]));
+        let query = IExpr::Pred(self.role, Box::new([IExpr::Var(0)]));
         let ret = { self.cur.query(&query).map(|x| match x {
             IExpr::Pred(_, args) => match &args[0] {
                 &IExpr::Atom(x) => x,
@@ -418,40 +462,34 @@ impl<'a> GGP<'a> {
         ret
     }
     pub fn legal_moves_for(&self, r: usize) -> Vec<IExpr> {
-        let legal = self.labeler.check("legal").unwrap();
-        let query = IExpr::Pred(legal, Box::new([IExpr::Atom(r), IExpr::Var(0)]));
+        let query = IExpr::Pred(self.legal, Box::new([IExpr::Atom(r), IExpr::Var(0)]));
         let ret = self.cur.query(&query).map(|x| match x { IExpr::Pred(_, args) => args[1].clone(), _ => unreachable!() }).collect();
         ret
     }
     pub fn play(&mut self, moves: &[(usize, IExpr)]) {
-        let does = self.labeler.check("does").unwrap();
-        let next = self.labeler.check("next").unwrap();
-        let tru = self.labeler.check("true").unwrap();
         let mut db = replace(&mut self.cur, self.base.clone());
         for &(r, ref m) in moves.iter() {
-            db.add(IFact { cons: IExpr::Pred(does, Box::new([IExpr::Atom(r), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
+            db.add(IFact { cons: IExpr::Pred(self.does, Box::new([IExpr::Atom(r), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
         }
-        let next_query = IExpr::Pred(next, Box::new([IExpr::Var(0)]));
+        let next_query = IExpr::Pred(self.next, Box::new([IExpr::Var(0)]));
         let mut nexts = db.query(&next_query).collect::<Vec<_>>();
         nexts.sort();
         nexts.dedup(); // TODO shouldn't have to do this..
         for next in nexts {
             match next {
-                IExpr::Pred(_, args) => self.cur.add(IFact { cons: IExpr::Pred(tru, args.clone()), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }),
+                IExpr::Pred(_, args) => self.cur.add(IFact { cons: IExpr::Pred(self.tru, args.clone()), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }),
                 _ => unreachable!()
             }
         }
     }
     pub fn is_done(&self) -> bool {
-        let terminal = self.labeler.check("terminal").unwrap();
-        self.cur.check(&IExpr::Atom(terminal))
+        self.cur.check(&IExpr::Atom(self.terminal))
     }
     pub fn goals(&self) -> HashMap<usize, u8> {
-        let goal = self.labeler.check("goal").unwrap();
-        let query = IExpr::Pred(goal, Box::new([IExpr::Var(0), IExpr::Var(1)]));
+        let query = IExpr::Pred(self.goal, Box::new([IExpr::Var(0), IExpr::Var(1)]));
         let ret = self.cur.query(&query).map(|g| match g {
             IExpr::Pred(_, args) => match (&args[0], &args[1]) {
-                (&IExpr::Atom(r), &IExpr::Atom(s)) => (r, self.labeler.get(s).unwrap().parse().unwrap()),
+                (&IExpr::Atom(r), &IExpr::Atom(s)) => (r, (usize::MAX - s) as u8),
                 _ => unreachable!()
             },
             _ => unreachable!()
@@ -550,7 +588,7 @@ mod tests {
 
         let mut rng = weak_rng();
         let (db, labeler) = set_up_tic_tac_toe();
-        let ggp = GGP::from_rules(db, labeler).unwrap();
+        let ggp = GGP::from_rules(db, &labeler).unwrap();
 
         assert!(!ggp.is_done());
         bench.iter(|| {
