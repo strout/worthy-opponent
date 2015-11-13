@@ -88,6 +88,24 @@ pub enum IExpr {
     Pred(usize, Box<[IExpr]>)
 }
 
+impl Display for IExpr {
+    fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
+        let write_interned = |fmt: &mut _, x| if x > usize::MAX - 256 { (HACKY_HACK[usize::MAX - x] as &str).fmt(fmt) } else { write!(fmt, "${}", x) };
+        match self {
+            &IExpr::Atom(x) => write_interned(fmt, x),
+            &IExpr::Var(x) => write!(fmt, "?{}", x),
+            &IExpr::Pred(x, ref args) => {
+                try!(write!(fmt, "("));
+                try!(write_interned(fmt, x));
+                for arg in args.iter() {
+                    try!(write!(fmt, " {}", arg));
+                }
+                write!(fmt, ")")
+            }
+        }
+    }
+}
+
 impl<'a> Expr<'a> {
     pub fn thru(&self, labeler: &mut Labeler<'a>) -> IExpr {
         match self {

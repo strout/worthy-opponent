@@ -157,7 +157,7 @@ fn think(role: usize, mut ggp: GGP, recvmvs: Receiver<Option<Vec<IExpr>>>, sendr
                 let mvs = roles.iter().cloned().zip(mvs).collect::<Vec<_>>();
                 let just_mvs = mvs.iter().map(|&(_, ref mv)| mv).cloned().collect::<Vec<_>>();
                 for (&mut (_, ref mut mc), &(_, ref mv)) in mcs.iter_mut().zip(mvs.iter()) {
-                    // print_mc(mc, Some(mv));
+                    print_mc(mc, Some(mv));
                     *mc = mc.children.remove(mv).and_then(|mut mc| mc.children.remove(&just_mvs)).unwrap_or(MCTree::new());
                 }
                 if !mvs.is_empty() { ggp.play(&mvs[..]) }
