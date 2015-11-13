@@ -7,8 +7,6 @@ use std::result::Result;
 pub use self::Expr::*;
 use self::{ValExpr as V};
 use std::borrow::Cow;
-use std::rc::Rc;
-use std::cell::RefCell;
 use std::usize;
 
 #[derive(Clone)]
@@ -374,7 +372,7 @@ impl DB {
     pub fn new() -> DB { DB { facts: HashMap::new() } }
     pub fn query<'b>(&'b self, expr: &'b IExpr) -> Box<Iterator<Item=IExpr> + 'b> {
         // TODO is Rc/RefCell really needed here? It's just a counter; isn't there a nicer way?
-        Box::new(self.query_inner(expr, Assignments::new(), 0, Rc::new(RefCell::new(0))).map(move |mut asg| { let val = asg.to_val(expr, 0); asg.from_val(&val) }))
+        Box::new(self.query_inner(expr, Assignments::new(), 0).map(move |mut asg| { let val = asg.to_val(expr, 0); asg.from_val(&val) }))
     }
     pub fn check(&self, e: &IExpr) -> bool {
         self.query(e).next().is_some()
@@ -386,25 +384,15 @@ impl DB {
         };
         e.or_insert(vec![]).push(f)
     }
-    fn query_inner<'b>(&'b self, expr: &'b IExpr, asg: Assignments, depth: usize, max_depth: Rc<RefCell<usize>>) -> Box<Iterator<Item=Assignments> + 'b> {
+    fn query_inner<'b>(&'b self, expr: &'b IExpr, asg: Assignments, depth: usize) -> Box<Iterator<Item=Assignments> + 'b> {
         let relevant : Box<Iterator<Item=&'b Vec<IFact>> + 'b> = match expr {
             &IExpr::Var(_) => Box::new(self.facts.values()),
             &IExpr::Atom(n) | &IExpr::Pred(n, _) => Box::new(self.facts.get(&n).into_iter())
         };
         Box::new(relevant.flat_map(|x| x.iter()).flat_map(move |&IFact { ref cons, ref pos, ref neg, ref distinct }| {
-            let r_depth = {
-                let mut md = max_depth.borrow_mut();
-                *md += 1;
-                *md
-            };
-            let pos = pos.iter().fold((Box::new(asg.clone().unify(expr, depth, &cons, r_depth).into_iter()) as Box<Iterator<Item=Assignments> + 'b>, max_depth.clone()), move |(asgs, max_depth), p| {
-                let md = max_depth.clone();
-                (Box::new(asgs.flat_map(move |asg| self.query_inner(p, asg, r_depth, max_depth.clone()))), md)
-            });
-            let neg = neg.iter().fold(pos, move |(asgs, max_depth), n| {
-                let md = max_depth.clone();
-                (Box::new(asgs.filter(move |asg| self.query_inner(n, asg.clone(), r_depth, max_depth.clone()).next().is_none())), md)
-            }).0;
+            let r_depth = depth + 1;
+            let pos = pos.iter().fold(Box::new(asg.clone().unify(expr, depth, &cons, r_depth).into_iter()) as Box<Iterator<Item=Assignments> + 'b>, move |asgs, p| Box::new(asgs.flat_map(move |asg| self.query_inner(p, asg, r_depth))));
+            let neg = neg.iter().fold(pos, move |asgs, n| Box::new(asgs.filter(move |asg| self.query_inner(n, asg.clone(), r_depth).next().is_none())));
             distinct.iter().fold(neg, move |asgs, &(ref l, ref r)| Box::new(asgs.filter(move |asg| asg.clone().unify(l, r_depth, r, r_depth).is_none())))
         }))
     }
