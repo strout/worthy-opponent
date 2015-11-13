@@ -6,7 +6,7 @@ extern crate thread_scoped;
 use tiny_http::{ServerBuilder, Response, Header};
 use rand::{Rng, weak_rng};
 use std::collections::HashMap;
-use worthy_opponent::ggp::{Expr, Var, Atom, Pred, DB, GGP, SExpr, sexpr_to_db, sexpr_to_expr, parse_sexpr};
+use worthy_opponent::ggp::{IExpr, Expr, GGP, SExpr, sexpr_to_db, sexpr_to_expr, parse_sexpr};
 use std::hash::Hash;
 use std::fmt::Display;
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
@@ -42,7 +42,7 @@ fn print_mc<A: Eq + Hash + Display, B: Eq + Hash>(mc: &MCTree<A, B>, chosen: Opt
     println!("");
 }
 
-fn choose_move<'a, 'b, T: Rng>(rng: &mut T, ggp: &GGP<'b>, role: &'b str, mc: &'a mut MCTree<Expr<'b>, Vec<Expr<'b>>>, explore: f64) -> (Expr<'b>, &'a mut MCTree<Vec<Expr<'b>>, Expr<'b>>) {
+fn choose_move<'a, 'b, T: Rng>(rng: &mut T, ggp: &GGP<'b>, role: usize, mc: &'a mut MCTree<IExpr, Vec<IExpr>>, explore: f64) -> (IExpr, &'a mut MCTree<Vec<IExpr>, IExpr>) {
     if mc.children.is_empty() {
         let mvs = ggp.legal_moves_for(role);
         mc.children.reserve(mvs.len());
@@ -70,7 +70,7 @@ fn choose_move<'a, 'b, T: Rng>(rng: &mut T, ggp: &GGP<'b>, role: &'b str, mc: &'
     (mv, child)
 }
 
-fn tree_search<'a, T: Rng>(rng: &mut T, ggp: &mut GGP<'a>, mcs: &mut [(&'a str, &mut MCTree<Expr<'a>, Vec<Expr<'a>>>)]) -> HashMap<&'a str, f64> {
+fn tree_search<T: Rng>(rng: &mut T, ggp: &mut GGP, mcs: &mut [(usize, &mut MCTree<IExpr, Vec<IExpr>>)]) -> HashMap<usize, f64> {
     let result = if ggp.is_done() {
         ggp.goals().into_iter().map(|(k, v)| (k, v as f64)).collect()
     } else {
@@ -81,7 +81,7 @@ fn tree_search<'a, T: Rng>(rng: &mut T, ggp: &mut GGP<'a>, mcs: &mut [(&'a str, 
             let mvs2 = mvs.iter().map(|x| x.1.clone()).collect::<Vec<_>>();
             let result = tree_search(rng, ggp, &mut next.iter_mut().map(|&mut (r, (_, ref mut mc))| (r, mc.children.entry(mvs2.clone()).or_insert(MCTree::new()))).collect::<Vec<_>>()[..]);
             for (r, (_, mc)) in next {
-                mc.payoff += result[r];
+                mc.payoff += result[&r];
                 mc.plays += 1;
             }
             result
@@ -94,13 +94,13 @@ fn tree_search<'a, T: Rng>(rng: &mut T, ggp: &mut GGP<'a>, mcs: &mut [(&'a str, 
         result
     };
     for &mut (r, ref mut mc) in mcs.iter_mut() {
-        mc.payoff += result[r];
+        mc.payoff += result[&r];
         mc.plays += 1;
     }
     result
 }
 
-fn play_out<'a, T: Rng>(rng: &mut T, ggp: &mut GGP<'a>, roles: &[&'a str]) -> HashMap<&'a str, f64> {
+fn play_out<T: Rng>(rng: &mut T, ggp: &mut GGP, roles: &[usize]) -> HashMap<usize, f64> {
     if ggp.is_done() {
         ggp.goals().into_iter().map(|(k, v)| (k, v as f64)).collect()
     } else {
@@ -118,8 +118,8 @@ fn play_out<'a, T: Rng>(rng: &mut T, ggp: &mut GGP<'a>, roles: &[&'a str]) -> Ha
 
 enum Message<'a> {
     Info,
-    Preview(DB<'a>, u32),
-    Start(&'a str, &'a str, DB<'a>, u32, u32),
+    Preview(SExpr<'a>, u32),
+    Start(&'a str, &'a str, SExpr<'a>, u32, u32),
     Play(&'a str, Vec<Expr<'a>>),
     Stop(&'a str, Vec<Expr<'a>>),
     Abort(&'a str)
@@ -128,8 +128,8 @@ enum Message<'a> {
 fn parse_message(s: &str) -> Option<Message> {
     parse_sexpr(s).ok().and_then(|(sexpr, _)| sexpr.as_list().and_then(|list| list[0].as_str().and_then(|name| match name {
         "info" => Some(Message::Info),
-        "preview" => sexpr_to_db(&list[1]).and_then(|db| list[2].as_str().and_then(|s| s.parse().ok().map(|clock| Message::Preview(db, clock)))),
-        "start" => list[1].as_str().and_then(|id| list[2].as_str().and_then(|role| sexpr_to_db(&list[3]).and_then(|db| list[4].as_str().and_then(|s| s.parse().ok().and_then(|start_clock| list[5].as_str().and_then(|s| s.parse().ok().map(|play_clock| Message::Start(id, role, db, start_clock, play_clock)))))))),
+        "preview" => list[2].as_str().and_then(|s| s.parse().ok().map(|clock| Message::Preview(list[1].clone(), clock))),
+        "start" => list[1].as_str().and_then(|id| list[2].as_str().and_then(|role| list[4].as_str().and_then(|s| s.parse().ok().and_then(|start_clock| list[5].as_str().and_then(|s| s.parse().ok().map(|play_clock| Message::Start(id, role, list[3].clone(), start_clock, play_clock))))))),
         "play" => list[1].as_str().and_then(|id| match list[2] {
             SExpr::Atom("nil") => Some(Message::Play(id, vec![])),
             SExpr::Atom(_) => None,
@@ -145,16 +145,7 @@ fn parse_message(s: &str) -> Option<Message> {
     })))
 }
 
-fn same(l: &Expr, r: &Expr) -> bool {
-    match (l, r) {
-        (&Var(ref l), &Var(ref r)) => l == r,
-        (&Atom(ref l), &Atom(ref r)) => l == r,
-        (&Pred(ref ln, ref la), &Pred(ref rn, ref ra)) => ln == rn && la.len() == ra.len() && la.iter().zip(ra.iter()).all(|(l, r)| same(l, r)),
-        _ => false
-    }
-}
-
-fn think<'a>(role: &'a str, mut ggp: GGP<'a>, recvmvs: Receiver<Option<String>>, sendreplies: Sender<Expr<'a>>) {
+fn think(role: usize, mut ggp: GGP, recvmvs: Receiver<Option<String>>, sendreplies: Sender<IExpr>) {
     let roles = ggp.roles();
     let mut mcs = roles.iter().map(|&r| (r, MCTree::new())).collect::<Vec<_>>();
     let mut rng = weak_rng();
@@ -165,15 +156,10 @@ fn think<'a>(role: &'a str, mut ggp: GGP<'a>, recvmvs: Receiver<Option<String>>,
             Ok(Some(mvs)) => {
                 if let Some(Message::Play(_, mvs)) = parse_message(&mvs) {
                     for mv in mvs.iter() { println!("{}", mv) }
-                    let legals = mcs.iter().map(|&(r, ref mc)| (r, if mc.children.is_empty() { ggp.legal_moves_for(r) } else { mc.children.keys().cloned().collect() })).collect::<HashMap<_, _>>();
-                    let mvs = roles.iter().cloned().zip(mvs.into_iter()) // TODO this is a hack because I need the right lifteime for the moves.
-                        .map(|(r, mv)| {
-                            let mv = legals[r].iter().find(|x| same(x, &mv)).unwrap().clone();
-                            (r, mv)
-                        }).collect::<Vec<_>>();
+                    let mvs = roles.iter().cloned().zip(mvs.into_iter().map(|mv| mv.try_thru(&ggp.labeler).unwrap())).collect::<Vec<_>>();
                     let just_mvs = mvs.iter().map(|&(_, ref mv)| mv).cloned().collect::<Vec<_>>();
                     for (&mut (_, ref mut mc), &(_, ref mv)) in mcs.iter_mut().zip(mvs.iter()) {
-                        print_mc(mc, Some(mv));
+                        // print_mc(mc, Some(mv));
                         *mc = mc.children.remove(mv).and_then(|mut mc| mc.children.remove(&just_mvs)).unwrap_or(MCTree::new());
                     }
                     if !mvs.is_empty() { ggp.play(&mvs[..]) }
@@ -195,7 +181,9 @@ fn think<'a>(role: &'a str, mut ggp: GGP<'a>, recvmvs: Receiver<Option<String>>,
 
 fn run_match(desc: String, recvmvs: Receiver<String>, sendreply: Sender<String>) {
     if let Some(Message::Start(id, role, db, _, play_clock)) = parse_message(&desc) {
-        let ggp = GGP::from_rules(db);
+        let (db, labeler) = sexpr_to_db(&db).unwrap();
+        let role = labeler.check(role).unwrap();
+        let ggp = GGP::from_rules(db, labeler.clone()).unwrap();
         let (sendmovexprs, recvmovexprs) = channel();
         let (sendreplies, recvreplies) = channel();
         let handle = unsafe { scoped(move || think(role, ggp, recvmovexprs, sendreplies)) };
@@ -204,7 +192,7 @@ fn run_match(desc: String, recvmvs: Receiver<String>, sendreply: Sender<String>)
             sendmovexprs.send(Some(mvs)).unwrap();
             sleep_ms(play_clock * 1000 - 500);
             sendmovexprs.send(None).unwrap();
-            sendreply.send(recvreplies.recv().unwrap().to_string()).unwrap();
+            sendreply.send(recvreplies.recv().unwrap().thru(&labeler).unwrap().to_string()).unwrap();
         }
         println!("Match {} shutting down.", id);
         drop(sendmovexprs);
