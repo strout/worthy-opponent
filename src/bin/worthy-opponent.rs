@@ -12,6 +12,7 @@ use std::fmt::Display;
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 use thread_scoped::scoped;
 use std::thread::{spawn, sleep_ms};
+use std::sync::{Mutex, Arc};
 
 #[derive(Debug)]
 struct MCTree<A: Eq + Hash, B: Eq + Hash> {
@@ -145,7 +146,7 @@ fn parse_message(s: &str) -> Option<Message> {
     })))
 }
 
-fn think(role: usize, mut ggp: GGP, recvmvs: Receiver<Option<Vec<IExpr>>>, sendreplies: Sender<IExpr>) {
+fn think(role: usize, mut ggp: GGP, recvmvs: Receiver<Vec<IExpr>>, reply: &Mutex<Option<IExpr>>) {
     let roles = ggp.roles();
     let mut mcs = roles.iter().map(|&r| (r, MCTree::new())).collect::<Vec<_>>();
     let mut rng = weak_rng();
@@ -153,7 +154,7 @@ fn think(role: usize, mut ggp: GGP, recvmvs: Receiver<Option<Vec<IExpr>>>, sendr
         match recvmvs.try_recv() {
             Err(TryRecvError::Empty) => {},
             Err(TryRecvError::Disconnected) => return,
-            Ok(Some(mvs)) => {
+            Ok(mvs) => {
                 let mvs = roles.iter().cloned().zip(mvs).collect::<Vec<_>>();
                 let just_mvs = mvs.iter().map(|&(_, ref mv)| mv).cloned().collect::<Vec<_>>();
                 for (&mut (_, ref mut mc), &(_, ref mv)) in mcs.iter_mut().zip(mvs.iter()) {
@@ -161,18 +162,15 @@ fn think(role: usize, mut ggp: GGP, recvmvs: Receiver<Option<Vec<IExpr>>>, sendr
                     *mc = mc.children.remove(mv).and_then(|mut mc| mc.children.remove(&just_mvs)).unwrap_or(MCTree::new());
                 }
                 if !mvs.is_empty() { ggp.play(&mvs[..]) }
-            },
-            Ok(None) => {
-                for &mut (r, ref mut mc) in mcs.iter_mut() {
-                    if r == role {
-                        let mv = choose_move(&mut rng, &ggp, role, mc, 0.0).0;
-                        sendreplies.send(mv).unwrap()
-                    }
-                }
-                // TODO send reply
             }
         }
         tree_search(&mut rng, &mut ggp.clone(), &mut mcs.iter_mut().map(|&mut (r, ref mut mc)| (r, mc)).collect::<Vec<_>>()[..]);
+        for &mut (r, ref mut mc) in mcs.iter_mut() {
+            if r == role {
+                let mv = choose_move(&mut rng, &ggp, role, mc, 0.0).0;
+                *reply.lock().unwrap() = Some(mv);
+            }
+        }
     }
 }
 
@@ -182,20 +180,27 @@ fn run_match(desc: String, recvmvs: Receiver<String>, sendreply: Sender<String>)
         let role = labeler.check(role).unwrap();
         let ggp = GGP::from_rules(db, &labeler).unwrap();
         let (sendmovexprs, recvmovexprs) = channel();
-        let (sendreplies, recvreplies) = channel();
-        let handle = unsafe { scoped(move || think(role, ggp, recvmovexprs, sendreplies)) };
+        let reply = Arc::new(Mutex::new(None));
+        let handle = {
+            let reply = reply.clone();
+            unsafe { scoped(move || think(role, ggp, recvmovexprs, &*reply)) }
+        };
+        let sendmovexprs = sendmovexprs; // Move sendmovexprs so it's dropped before handle if we panic.
         println!("Match {} ready.", id);
         while let Ok(mvs) = recvmvs.recv() {
             if let Some(Message::Play(_, mvs)) = parse_message(&mvs) {
-                sendmovexprs.send(Some(mvs.iter().map(|mv| mv.try_thru(&labeler).unwrap()).collect())).unwrap();
-                sleep_ms(play_clock * 1000 - 500);
-                sendmovexprs.send(None).unwrap();
-                sendreply.send(recvreplies.recv().unwrap().thru(&labeler).unwrap().to_string()).unwrap();
+                sendmovexprs.send(mvs.iter().map(|mv| mv.try_thru(&labeler).unwrap()).collect()).unwrap();
+                sleep_ms(play_clock * 1000 - 200);
+                let mut reply = reply.lock().unwrap();
+                match (&*reply).as_ref() {
+                    None => sendreply.send("oops-i-timed-out".to_string()).unwrap(),
+                    Some(mv) => sendreply.send(mv.thru(&labeler).unwrap().to_string()).unwrap() // no move found in time :(
+                }
+                *reply = None;
             }
         }
         println!("Match {} shutting down.", id);
         drop(sendmovexprs);
-        drop(recvreplies);
         handle.join();
     }
 }
@@ -205,23 +210,32 @@ fn main() {
     let mut ongoing = HashMap::new();
     let mut body = String::new();
     for mut req in srv.incoming_requests() {
+        println!("{} matches running.", ongoing.len());
         body.clear();
         req.as_reader().read_to_string(&mut body).unwrap();
         let body = body.to_lowercase();
         println!("Got: [[\n{}\n]]", body);
         match parse_message(&body) {
             Some(Message::Info) => req.respond(Response::from_data("available").with_header(Header::from_bytes("Content-Type", "text/acl").unwrap())),
-            Some(Message::Preview(_, _)) => req.respond(Response::from_data("ready").with_header(Header::from_bytes("Content-Type", "text/acl").unwrap())),
-            Some(Message::Start(id, _, _, _, _)) => {
+            Some(Message::Preview(_, _)) => {},
+            Some(Message::Start(id, _, _, start_clock, _)) => {
                 let (sendmvs, recvmvs) = channel();
                 let (sendreply, recvreply) = channel();
                 ongoing.insert(id.to_string(), (sendmvs, recvreply));
                 let desc = body.clone();
                 spawn(move || run_match(desc, recvmvs, sendreply));
+                sleep_ms(1000 * start_clock - 200);
+                req.respond(Response::from_data("ready").with_header(Header::from_bytes("Content-Type", "text/acl").unwrap()))
             },
             Some(Message::Play(id, _)) => if let Some(&mut (ref mut sendmvs, ref mut recvreply)) = ongoing.get_mut(id) {
                 sendmvs.send(body.clone()).unwrap();
-                req.respond(Response::from_data(recvreply.recv().unwrap()).with_header(Header::from_bytes("Content-Type", "text/acl").unwrap()))
+                match recvreply.recv() {
+                    Ok(mv) => req.respond(Response::from_data(mv).with_header(Header::from_bytes("Content-Type", "text/acl").unwrap())),
+                    Err(err) => {
+                        println!("Error in match {}: {}", id, err);
+                        req.respond(Response::from_data("oops-i-crashed").with_header(Header::from_bytes("Content-Type", "text/acl").unwrap()))
+                    }
+                }
             } else { println!("Asked to play in unknown match {}", id) },
             Some(Message::Stop(id, _)) | Some(Message::Abort(id)) => { ongoing.remove(id); },
             None => { println!("Bad request: {}", body); req.respond(Response::from_string("dunno-lol").with_status_code(400)) }
