@@ -6,7 +6,6 @@ use std::fmt::{Display, Formatter, Error};
 use std::result::Result;
 pub use self::Expr::*;
 use self::{ValExpr as V};
-use std::mem::replace;
 use std::borrow::Cow;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -485,14 +484,15 @@ impl GGP {
         ret
     }
     pub fn play(&mut self, moves: &[(usize, IExpr)]) {
-        let mut db = replace(&mut self.cur, self.base.clone());
         for &(r, ref m) in moves.iter() {
-            db.add(IFact { cons: IExpr::Pred(self.does, Box::new([IExpr::Atom(r), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
+            self.cur.add(IFact { cons: IExpr::Pred(self.does, Box::new([IExpr::Atom(r), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
         }
         let next_query = IExpr::Pred(self.next, Box::new([IExpr::Var(0)]));
-        let mut nexts = db.query(&next_query).collect::<Vec<_>>();
+        let mut nexts = self.cur.query(&next_query).collect::<Vec<_>>();
         nexts.sort();
         nexts.dedup(); // TODO shouldn't have to do this..
+        self.cur.facts.get_mut(&self.does).unwrap().clear();
+        self.cur.facts.get_mut(&self.tru).unwrap().clear();
         for next in nexts {
             match next {
                 IExpr::Pred(_, args) => self.cur.add(IFact { cons: IExpr::Pred(self.tru, args.clone()), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }),
