@@ -412,8 +412,7 @@ impl DB {
 
 #[derive(Clone)]
 pub struct GGP {
-    base: DB,
-    cur: DB,
+    db: DB,
     tru: usize,
     role: usize,
     legal: usize,
@@ -424,8 +423,7 @@ pub struct GGP {
 }
 
 impl GGP {
-    pub fn from_rules(base: DB, labeler: &Labeler) -> Option<GGP> {
-        let mut cur = base.clone();
+    pub fn from_rules(mut db: DB, labeler: &Labeler) -> Option<GGP> {
         let init = match labeler.check("init") {
             Some(x) => x,
             None => return None
@@ -459,17 +457,18 @@ impl GGP {
             Some(x) => x,
             None => return None
         };
-        for init in base.query(&init_query) {
+        let inits = db.query(&init_query).collect::<Vec<_>>();
+        for init in inits {
             match init {
-                IExpr::Pred(_, args) => cur.add(IFact { cons: IExpr::Pred(tru, args.clone()), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }),
+                IExpr::Pred(_, args) => db.add(IFact { cons: IExpr::Pred(tru, args.clone()), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }),
                 _ => unreachable!()
             }
         }
-        Some(GGP { base: base, cur: cur, tru: tru, role: role, legal: legal, does: does, next: next, terminal: terminal, goal: goal })
+        Some(GGP { db: db, tru: tru, role: role, legal: legal, does: does, next: next, terminal: terminal, goal: goal })
     }
     pub fn roles(&self) -> Vec<usize> {
         let query = IExpr::Pred(self.role, Box::new([IExpr::Var(0)]));
-        let ret = { self.cur.query(&query).map(|x| match x {
+        let ret = { self.db.query(&query).map(|x| match x {
             IExpr::Pred(_, args) => match &args[0] {
                 &IExpr::Atom(x) => x,
                 _ => unreachable!()
@@ -480,32 +479,32 @@ impl GGP {
     }
     pub fn legal_moves_for(&self, r: usize) -> Vec<IExpr> {
         let query = IExpr::Pred(self.legal, Box::new([IExpr::Atom(r), IExpr::Var(0)]));
-        let ret = self.cur.query(&query).map(|x| match x { IExpr::Pred(_, args) => args[1].clone(), _ => unreachable!() }).collect();
+        let ret = self.db.query(&query).map(|x| match x { IExpr::Pred(_, args) => args[1].clone(), _ => unreachable!() }).collect();
         ret
     }
     pub fn play(&mut self, moves: &[(usize, IExpr)]) {
         for &(r, ref m) in moves.iter() {
-            self.cur.add(IFact { cons: IExpr::Pred(self.does, Box::new([IExpr::Atom(r), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
+            self.db.add(IFact { cons: IExpr::Pred(self.does, Box::new([IExpr::Atom(r), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
         }
         let next_query = IExpr::Pred(self.next, Box::new([IExpr::Var(0)]));
-        let mut nexts = self.cur.query(&next_query).collect::<Vec<_>>();
+        let mut nexts = self.db.query(&next_query).collect::<Vec<_>>();
         nexts.sort();
         nexts.dedup(); // TODO shouldn't have to do this..
-        self.cur.facts.get_mut(&self.does).unwrap().clear();
-        self.cur.facts.get_mut(&self.tru).unwrap().clear();
+        self.db.facts.get_mut(&self.does).unwrap().clear();
+        self.db.facts.get_mut(&self.tru).unwrap().clear();
         for next in nexts {
             match next {
-                IExpr::Pred(_, args) => self.cur.add(IFact { cons: IExpr::Pred(self.tru, args.clone()), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }),
+                IExpr::Pred(_, args) => self.db.add(IFact { cons: IExpr::Pred(self.tru, args.clone()), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }),
                 _ => unreachable!()
             }
         }
     }
     pub fn is_done(&self) -> bool {
-        self.cur.check(&IExpr::Atom(self.terminal))
+        self.db.check(&IExpr::Atom(self.terminal))
     }
     pub fn goals(&self) -> HashMap<usize, u8> {
         let query = IExpr::Pred(self.goal, Box::new([IExpr::Var(0), IExpr::Var(1)]));
-        let ret = self.cur.query(&query).map(|g| match g {
+        let ret = self.db.query(&query).map(|g| match g {
             IExpr::Pred(_, args) => match (&args[0], &args[1]) {
                 (&IExpr::Atom(r), &IExpr::Atom(s)) => (r, (usize::MAX - s) as u8),
                 _ => unreachable!()
