@@ -45,7 +45,7 @@ impl<'a> Labeler<'a> {
 const HACKY_HACK : [&'static str; 256] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95", "96", "97", "98", "99", "100", "101", "102", "103", "104", "105", "106", "107", "108", "109", "110", "111", "112", "113", "114", "115", "116", "117", "118", "119", "120", "121", "122", "123", "124", "125", "126", "127", "128", "129", "130", "131", "132", "133", "134", "135", "136", "137", "138", "139", "140", "141", "142", "143", "144", "145", "146", "147", "148", "149", "150", "151", "152", "153", "154", "155", "156", "157", "158", "159", "160", "161", "162", "163", "164", "165", "166", "167", "168", "169", "170", "171", "172", "173", "174", "175", "176", "177", "178", "179", "180", "181", "182", "183", "184", "185", "186", "187", "188", "189", "190", "191", "192", "193", "194", "195", "196", "197", "198", "199", "200", "201", "202", "203", "204", "205", "206", "207", "208", "209", "210", "211", "212", "213", "214", "215", "216", "217", "218", "219", "220", "221", "222", "223", "224", "225", "226", "227", "228", "229", "230", "231", "232", "233", "234", "235", "236", "237", "238", "239", "240", "241", "242", "243", "244", "245", "246", "247", "248", "249", "250", "251", "252", "253", "254", "255"];
 
 #[derive(Clone, Debug)]
-struct Assignments {
+pub struct Assignments {
     vars: HashMap<(usize, usize), usize>,
     vals: Vec<ValExpr>,
     binds: Vec<usize>
@@ -309,7 +309,7 @@ fn expr_to_fact<'a>(expr: Expr<'a>) -> Option<Vec<Fact<'a>>> {
 }
 
 impl Assignments {
-    fn new() -> Assignments { Assignments { vars: HashMap::new(), vals: vec![], binds: vec![] } }
+    pub fn new() -> Assignments { Assignments { vars: HashMap::new(), vals: vec![], binds: vec![] } }
     fn get_val(&self, base: &V) -> V {
         match base {
             &V::Var(mut i) => {
@@ -442,25 +442,29 @@ impl DB {
 }
 
 pub struct Iter<'a> {
-    asg: Assignments,
+    asg: &'a mut Assignments,
     db: &'a DB,
-    stack: Vec<(usize, usize, usize)>
+    stack: Vec<(usize, usize, usize)>,
+    level: usize
 }
 
 impl<'a> Iter<'a> {
-    pub fn new(expr: &IExpr, db: &'a DB) -> Iter<'a> {
-        let mut me = Iter { asg: Assignments::new(), db: db, stack: vec![] };
-        me.add_goal(expr);
-        me
+    pub fn with_assignments(asg: &'a mut Assignments, level: usize, db: &'a DB) -> Iter<'a> {
+        Iter { asg: asg, db: db, stack: vec![], level: level }
+    }
+    fn to_val(&mut self, expr: &IExpr) -> ValExpr {
+        let lev = self.level();
+        self.asg.to_val(expr, lev)
     }
     fn add_goal(&mut self, goal: &IExpr) {
-        let val = self.asg.to_val(goal, self.stack.len());
+        let val = self.to_val(goal);
         let goal = self.asg.vals.len();
         self.asg.vals.push(V::Var(goal));
         self.asg.bind(goal, val);
         let depth = self.asg.binds.len();
         self.stack.push((goal, depth, 0))
     }
+    fn level(&self) -> usize { self.stack.len() + self.level }
 }
 
 impl<'a> Iterator for Iter<'a> {
@@ -481,7 +485,7 @@ impl<'a> Iterator for Iter<'a> {
                     }
                     Some(&IFact { ref head, ref body }) => {
                         self.stack.push((goal, depth, cur + 1));
-                        let head = self.asg.to_val(head, self.stack.len());
+                        let head = self.to_val(head);
                         if self.asg.unify_val(&V::Var(goal), &head) {
                             match body.first() {
                                 None => {
@@ -491,7 +495,28 @@ impl<'a> Iterator for Iter<'a> {
                                     self.add_goal(p);
                                     self.next()
                                 },
-                                _ => unimplemented!()
+                                Some(&IThing::False(ref n)) => {
+                                    let ok = {
+                                        let lev = self.level();
+                                        let mut nested = Iter::with_assignments(self.asg, lev, self.db);
+                                        nested.add_goal(n);
+                                        nested.next().is_none()
+                                    };
+                                    if ok {
+                                        Some(())
+                                    } else {
+                                        self.next()
+                                    }
+                                },
+                                Some(&IThing::Distinct(ref l, ref r)) => {
+                                    let l = self.to_val(l);
+                                    let r = self.to_val(r);
+                                    if self.asg.unify_val(&l, &r) {
+                                        self.next()
+                                    } else {
+                                        Some(())
+                                    }
+                                }
                             }
                             // TODO figure out how to handle multiple goals (to allow matching
                             // _all_ of the previous things
@@ -823,7 +848,9 @@ mod tests {
         db.add(fact(pred("man", vec![atom("socrates")]), vec![], vec![], vec![]).thru(&mut labeler));
         db.add(fact(pred("man", vec![atom("aristotle")]), vec![], vec![], vec![]).thru(&mut labeler));
         db.add(fact(pred("mortal", vec![var("X")]), vec![pred("man", vec![var("X")])], vec![], vec![]).thru(&mut labeler));
-        let iter = Iter::new(&pred("mortal", vec![var("X")]).thru(&mut labeler), &db);
+        let mut asg = Assignments::new();
+        let mut iter = Iter::with_assignments(&mut asg, 0, &mut db);
+        iter.add_goal(&pred("mortal", vec![var("X")]).thru(&mut labeler));
         assert_eq!(2, iter.count());
     }
 }
