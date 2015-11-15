@@ -205,68 +205,91 @@ pub fn sexpr_to_expr<'a>(sexpr: &SExpr<'a>) -> Option<Expr<'a>> {
 }
 
 #[derive(Clone)]
+pub enum Thing<'a> {
+    True(Expr<'a>),
+    False(Expr<'a>),
+    Distinct(Expr<'a>, Expr<'a>)
+}
+
+impl<'a> Thing<'a> {
+    fn thru(&self, labeler: &mut Labeler<'a>) -> IThing {
+        match *self {
+            Thing::True(ref expr) => IThing::True(expr.thru(labeler)),
+            Thing::False(ref expr) => IThing::False(expr.thru(labeler)),
+            Thing::Distinct(ref left, ref right) => IThing::Distinct(left.thru(labeler), right.thru(labeler))
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct Fact<'a> {
-    cons: Expr<'a>,
-    pos: Box<[Expr<'a>]>,
-    neg: Box<[Expr<'a>]>,
-    distinct: Box<[(Expr<'a>, Expr<'a>)]>
+    head: Expr<'a>,
+    body: Box<[Thing<'a>]>
+}
+
+#[derive(Clone)]
+pub enum IThing {
+    True(IExpr),
+    False(IExpr),
+    Distinct(IExpr, IExpr)
 }
 
 #[derive(Clone)]
 pub struct IFact {
-    cons: IExpr,
-    pos: Box<[IExpr]>,
-    neg: Box<[IExpr]>,
-    distinct: Box<[(IExpr, IExpr)]>
+    head: IExpr,
+    body: Box<[IThing]>,
 }
 
 impl<'a> Fact<'a> {
     fn thru(&self, labeler: &mut Labeler<'a>) -> IFact {
         IFact {
-            cons: self.cons.thru(labeler),
-            pos: self.pos.iter().map(|x| x.thru(labeler)).collect::<Vec<_>>().into_boxed_slice(),
-            neg: self.neg.iter().map(|x| x.thru(labeler)).collect::<Vec<_>>().into_boxed_slice(),
-            distinct: self.distinct.iter().map(|&(ref l, ref r)| (l.thru(labeler), r.thru(labeler))).collect::<Vec<_>>().into_boxed_slice()
+            head: self.head.thru(labeler),
+            body: self.body.iter().map(|x| x.thru(labeler)).collect::<Vec<_>>().into_boxed_slice(),
+        }
+    }
+}
+
+impl<'a> Display for Thing<'a> {
+    fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
+        match *self {
+            Thing::True(ref e) => e.fmt(fmt),
+            Thing::False(ref e) => write!(fmt, "(not {})", e),
+            Thing::Distinct(ref l, ref r) => write!(fmt, "(distinct {} {})", l, r)
         }
     }
 }
 
 impl<'a> Display for Fact<'a> {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
-        if self.pos.is_empty() && self.neg.is_empty() && self.distinct.is_empty() {
-            return write!(fmt, "{}", self.cons);
+        if self.body.is_empty() {
+            write!(fmt, "{}", self.head)
+        } else {
+            try!(write!(fmt, "(<= {}", self.head));
+            for p in self.body.iter() {
+                try!(write!(fmt, " {}", p));
+            }
+            write!(fmt, ")")
         }
-        try!(write!(fmt, "(<= {}", self.cons));
-        for p in self.pos.iter() {
-            try!(write!(fmt, " {}", p));
-        }
-        for n in self.neg.iter() {
-            try!(write!(fmt, " (not {})", n));
-        }
-        for &(ref l, ref r) in self.distinct.iter() {
-            try!(write!(fmt, " distinct({}, {})", l, r));
-        }
-        write!(fmt, ")")
     }
 }
 
-fn add_arg<'a, 'b, I: Iterator<Item=(Vec<Expr<'b>>, Vec<Expr<'b>>, Vec<(Expr<'b>, Expr<'b>)>)> + 'a>(sofar: I, arg: &'a Expr<'b>) -> Box<Iterator<Item=(Vec<Expr<'b>>, Vec<Expr<'b>>, Vec<(Expr<'b>, Expr<'b>)>)> + 'a> {
+fn add_arg<'a, 'b, I: Iterator<Item=Vec<Thing<'b>>> + 'a>(sofar: I, arg: &'a Expr<'b>) -> Box<Iterator<Item=Vec<Thing<'b>>> + 'a> {
     match arg {
         &Pred(ref name, ref args) => match name as &str {
-            "not" => Box::new(sofar.map(move |(pos, mut neg, distinct)| { neg.push(args[0].clone()); (pos, neg, distinct) })),
+            "not" => Box::new(sofar.map(move |mut body| { body.push(Thing::False(args[0].clone())); body })),
             "and" => Box::new(args.iter().fold(Box::new(sofar) as Box<Iterator<Item=_>>, add_arg)),
-            "or" => Box::new(sofar.flat_map(move |(pos, neg, distinct)| args.iter().flat_map(move |arg| add_arg(Box::new(once((pos.clone(), neg.clone(), distinct.clone()))), arg)))),
-            "distinct" => Box::new(sofar.map(move |(pos, neg, mut distinct)| { distinct.push((args[0].clone(), args[1].clone())); (pos, neg, distinct) })),
-            _ => Box::new(sofar.map(move |(mut pos, neg, distinct)| { pos.push(arg.clone()); (pos, neg, distinct) }))
+            "or" => Box::new(sofar.flat_map(move |body| args.iter().flat_map(move |arg| add_arg(Box::new(once(body.clone())), arg)))),
+            "distinct" => Box::new(sofar.map(move |mut body| { body.push(Thing::Distinct(args[0].clone(), args[1].clone())); body })),
+            _ => Box::new(sofar.map(move |mut body| { body.push(Thing::True(arg.clone())); body }))
         },
-        _ => Box::new(sofar.map(move |(mut pos, neg, distinct)| { pos.push(arg.clone()); (pos, neg, distinct) }))
+        &Var(_) => panic!("That's not right")
     }
 }
 
-fn add_args<'a, 'b, I: Iterator<Item=&'a Expr<'b>>>(cons: &'a Expr<'b>, from: I) -> Box<Iterator<Item=Fact<'b>> + 'a> {
-    let base = Box::new(once((vec![], vec![], vec![]))) as Box<Iterator<Item=_>>;
+fn add_args<'a, 'b, I: Iterator<Item=&'a Expr<'b>>>(head: &'a Expr<'b>, from: I) -> Box<Iterator<Item=Fact<'b>> + 'a> {
+    let base = Box::new(once(vec![])) as Box<Iterator<Item=_>>;
     let ret = from.fold(base, add_arg);
-    Box::new(ret.map(move |(pos, neg, distinct)| Fact { cons: cons.clone(), pos: pos.into_boxed_slice(), neg: neg.into_boxed_slice(), distinct: distinct.into_boxed_slice() }))
+    Box::new(ret.map(move |body| Fact { head: head.clone(), body: body.into_boxed_slice() }))
 }
 
 fn expr_to_fact<'a>(expr: Expr<'a>) -> Option<Vec<Fact<'a>>> {
@@ -279,7 +302,7 @@ fn expr_to_fact<'a>(expr: Expr<'a>) -> Option<Vec<Fact<'a>>> {
                     let (head, body) = args.split_at(1);
                     Some(add_args(&head[0], body.iter()).collect())
                 },
-                _ => Some(vec![Fact { cons: Pred(name, args), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }])
+                _ => Some(vec![Fact { head: Pred(name, args), body: Box::new([]) }])
             }
         }
     }
@@ -382,7 +405,7 @@ impl DB {
         self.query(e).next().is_some()
     }
     pub fn add(&mut self, f: IFact) {
-        let e = match f.cons {
+        let e = match f.head {
             IExpr::Pred(n, _) => self.facts.entry(n),
             IExpr::Var(_) => panic!("Can't add a variable as a fact.")
         };
@@ -393,21 +416,27 @@ impl DB {
             &IExpr::Var(_) => panic!("Can't query for a variable."),
             &IExpr::Pred(n, _) => self.facts.get(&n).expect("Can't query something that isn't in the database.")
         };
-        Box::new(relevant.iter().flat_map(move |&IFact { ref cons, ref pos, ref neg, ref distinct }| {
+        Box::new(relevant.iter().flat_map(move |&IFact { ref head, ref body }| {
             let r_depth = {
                 let mut md = max_depth.borrow_mut();
                 *md += 1;
                 *md
             };
-            let pos = pos.iter().fold((Box::new(asg.clone().unify(expr, depth, &cons, r_depth).into_iter()) as Box<Iterator<Item=Assignments> + 'b>, max_depth.clone()), move |(asgs, max_depth), p| {
-                let md = max_depth.clone();
-                (Box::new(asgs.flat_map(move |asg| self.query_inner(p, asg, r_depth, max_depth.clone()))), md)
-            });
-            let neg = neg.iter().fold(pos, move |(asgs, max_depth), n| {
-                let md = max_depth.clone();
-                (Box::new(asgs.filter(move |asg| self.query_inner(n, asg.clone(), r_depth, max_depth.clone()).next().is_none())), md)
-            }).0;
-            distinct.iter().fold(neg, move |asgs, &(ref l, ref r)| Box::new(asgs.filter(move |asg| asg.clone().unify(l, r_depth, r, r_depth).is_err())))
+            body.iter().fold((Box::new(asg.clone().unify(expr, depth, &head, r_depth).into_iter()) as Box<Iterator<Item=Assignments> + 'b>, max_depth.clone()), move |(asgs, max_depth), t| {
+                match *t {
+                    IThing::True(ref p) => {
+                        let md = max_depth.clone();
+                        (Box::new(asgs.flat_map(move |asg| self.query_inner(p, asg, r_depth, max_depth.clone()))), md)
+                    },
+                    IThing::False(ref n) => {
+                        let md = max_depth.clone();
+                        (Box::new(asgs.filter(move |asg| self.query_inner(n, asg.clone(), r_depth, max_depth.clone()).next().is_none())), md)
+                    },
+                    IThing::Distinct(ref l, ref r) => {
+                        (Box::new(asgs.filter(move |asg| asg.clone().unify(l, r_depth, r, r_depth).is_err())), max_depth)
+                    }
+                }
+            }).0
         }))
     }
 }
@@ -450,21 +479,22 @@ impl<'a> Iterator for Iter<'a> {
                     None => {
                         self.next()
                     }
-                    Some(&IFact { ref cons, ref pos, ref neg, ref distinct }) => {
+                    Some(&IFact { ref head, ref body }) => {
                         self.stack.push((goal, depth, cur + 1));
-                        let cons = self.asg.to_val(cons, self.stack.len());
-                        if self.asg.unify_val(&V::Var(goal), &cons) {
-                            match pos.first() {
+                        let head = self.asg.to_val(head, self.stack.len());
+                        if self.asg.unify_val(&V::Var(goal), &head) {
+                            match body.first() {
                                 None => {
                                     Some(())
                                 },
-                                Some(p) => {
+                                Some(&IThing::True(ref p)) => {
                                     self.add_goal(p);
                                     self.next()
-                                }
+                                },
+                                _ => unimplemented!()
                             }
-                            // TODO figure out how to handle multiple goals (to allow pushing
-                            // _all_ of pos/neg/distinct
+                            // TODO figure out how to handle multiple goals (to allow matching
+                            // _all_ of the previous things
                         } else {
                             self.next()
                         }
@@ -525,7 +555,7 @@ impl GGP {
         let inits = db.query(&init_query).collect::<Vec<_>>();
         for init in inits {
             match init {
-                IExpr::Pred(_, args) => db.add(IFact { cons: IExpr::Pred(tru, args.clone()), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }),
+                IExpr::Pred(_, args) => db.add(IFact { head: IExpr::Pred(tru, args.clone()), body: Box::new([]) }),
                 _ => unreachable!()
             }
         }
@@ -549,7 +579,7 @@ impl GGP {
     }
     pub fn play(&mut self, moves: &[(usize, IExpr)]) {
         for &(r, ref m) in moves.iter() {
-            self.db.add(IFact { cons: IExpr::Pred(self.does, Box::new([IExpr::Pred(r, Box::new([])), m.clone()])), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
+            self.db.add(IFact { head: IExpr::Pred(self.does, Box::new([IExpr::Pred(r, Box::new([])), m.clone()])), body: Box::new([]) });
         }
         let next_query = IExpr::Pred(self.next, Box::new([IExpr::Var(0)]));
         let mut nexts = self.db.query(&next_query).collect::<Vec<_>>();
@@ -559,7 +589,7 @@ impl GGP {
         self.db.facts.get_mut(&self.tru).unwrap().clear();
         for next in nexts {
             match next {
-                IExpr::Pred(_, args) => self.db.add(IFact { cons: IExpr::Pred(self.tru, args.clone()), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) }),
+                IExpr::Pred(_, args) => self.db.add(IFact { head: IExpr::Pred(self.tru, args.clone()), body: Box::new([]) }),
                 _ => unreachable!()
             }
         }
@@ -585,7 +615,7 @@ mod tests {
     use super::*;
     use test::Bencher;
 
-    fn fact<'a>(cons: Expr<'a>, pos: Vec<Expr<'a>>, neg: Vec<Expr<'a>>, distinct: Vec<(Expr<'a>, Expr<'a>)>) -> Fact<'a> { Fact { cons: cons, pos: pos.into_boxed_slice(), neg: neg.into_boxed_slice(), distinct: distinct.into_boxed_slice() } }
+    fn fact<'a>(head: Expr<'a>, pos: Vec<Expr<'a>>, neg: Vec<Expr<'a>>, distinct: Vec<(Expr<'a>, Expr<'a>)>) -> Fact<'a> { Fact { head: head, body: pos.into_iter().map(|p| Thing::True(p)).chain(neg.into_iter().map(|n| Thing::False(n))).chain(distinct.into_iter().map(|(l, r)| Thing::Distinct(l, r))).collect::<Vec<_>>().into_boxed_slice() } }
     fn pred<'a>(name: &'a str, args: Vec<Expr<'a>>) -> Expr<'a> { Pred(name.into(), args.into_boxed_slice()) }
     fn atom<'a>(x: &'a str) -> Expr<'a> { Pred(x.into(), Box::new([])) }
     fn var<'a>(x: &'a str) -> Expr<'a> { Var(x.into()) }
@@ -636,7 +666,7 @@ mod tests {
 
         for expr in init.iter() {
             if let &IExpr::Pred(_, ref args) = expr {
-                db.add(IFact { cons: IExpr::Pred(labeler.put("true"), args.iter().cloned().collect::<Vec<_>>().into_boxed_slice()), pos: Box::new([]), neg: Box::new([]), distinct: Box::new([]) });
+                db.add(IFact { head: IExpr::Pred(labeler.put("true"), args.iter().cloned().collect::<Vec<_>>().into_boxed_slice()), body: Box::new([]) });
             } else { unreachable!() }
         }
 
