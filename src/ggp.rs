@@ -342,7 +342,7 @@ impl Assignments {
         self.binds.push(var)
     }
     fn unwind(&mut self, depth: usize) {
-        while depth > self.binds.len() {
+        while depth < self.binds.len() {
             let i = self.binds.pop().unwrap();
             self.vals[i] = V::Var(i)
         }
@@ -409,6 +409,69 @@ impl DB {
             }).0;
             distinct.iter().fold(neg, move |asgs, &(ref l, ref r)| Box::new(asgs.filter(move |asg| asg.clone().unify(l, r_depth, r, r_depth).is_err())))
         }))
+    }
+}
+
+pub struct Iter<'a> {
+    asg: Assignments,
+    db: &'a DB,
+    stack: Vec<(usize, usize, usize)>
+}
+
+impl<'a> Iter<'a> {
+    pub fn new(expr: &IExpr, db: &'a DB) -> Iter<'a> {
+        let mut me = Iter { asg: Assignments::new(), db: db, stack: vec![] };
+        me.add_goal(expr);
+        me
+    }
+    fn add_goal(&mut self, goal: &IExpr) {
+        let val = self.asg.to_val(goal, self.stack.len());
+        let goal = self.asg.vals.len();
+        self.asg.vals.push(V::Var(goal));
+        self.asg.bind(goal, val);
+        let depth = self.asg.binds.len();
+        self.stack.push((goal, depth, 0))
+    }
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = ();
+    fn next(&mut self) -> Option<()> {
+        let frame = self.stack.pop();
+        match frame {
+            None => None,
+            Some((goal, depth, cur)) => {
+                self.asg.unwind(depth);
+                let facts = match self.asg.vals[goal] {
+                    V::Pred(n, _) => self.db.facts.get(&n).expect("Can't query for facts not in the database"),
+                    V::Var(_) => panic!("Can't query for a variable")
+                };
+                match facts.get(cur) {
+                    None => {
+                        self.next()
+                    }
+                    Some(&IFact { ref cons, ref pos, ref neg, ref distinct }) => {
+                        self.stack.push((goal, depth, cur + 1));
+                        let cons = self.asg.to_val(cons, self.stack.len());
+                        if self.asg.unify_val(&V::Var(goal), &cons) {
+                            match pos.first() {
+                                None => {
+                                    Some(())
+                                },
+                                Some(p) => {
+                                    self.add_goal(p);
+                                    self.next()
+                                }
+                            }
+                            // TODO figure out how to handle multiple goals (to allow pushing
+                            // _all_ of pos/neg/distinct
+                        } else {
+                            self.next()
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -721,5 +784,16 @@ mod tests {
         db.add(fact(atom("open"), vec![pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])], vec![], vec![]).thru(&mut labeler));
 
         (db, labeler)
+    }
+
+    #[test]
+    fn iterator_basics() {
+        let mut db = DB::new();
+        let mut labeler = Labeler::new();
+        db.add(fact(pred("man", vec![atom("socrates")]), vec![], vec![], vec![]).thru(&mut labeler));
+        db.add(fact(pred("man", vec![atom("aristotle")]), vec![], vec![], vec![]).thru(&mut labeler));
+        db.add(fact(pred("mortal", vec![var("X")]), vec![pred("man", vec![var("X")])], vec![], vec![]).thru(&mut labeler));
+        let iter = Iter::new(&pred("mortal", vec![var("X")]).thru(&mut labeler), &db);
+        assert_eq!(2, iter.count());
     }
 }
