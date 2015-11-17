@@ -68,11 +68,15 @@ impl<'a> Display for Expr<'a> {
         match self {
             &Var(ref s) => write!(fmt, "?{}", s),
             &Pred(ref name, ref args) => {
-                try!(write!(fmt, "({}", name));
-                for arg in args.iter() {
-                    try!(write!(fmt, " {}", arg));
+                if args.is_empty() { 
+                    name.fmt(fmt)
+                } else { 
+                    try!(write!(fmt, "({}", name));
+                    for arg in args.iter() {
+                        try!(write!(fmt, " {}", arg));
+                    }
+                    write!(fmt, ")")
                 }
-                write!(fmt, ")")
             }
         }
     }
