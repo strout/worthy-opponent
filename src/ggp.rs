@@ -46,7 +46,7 @@ const HACKY_HACK : [&'static str; 256] = ["0", "1", "2", "3", "4", "5", "6", "7"
 
 #[derive(Clone, Debug)]
 pub struct Assignments {
-    vars: HashMap<(usize, usize), usize>,
+    vars: Vec<HashMap<usize, usize>>,
     vals: Vec<ValExpr>,
     binds: Vec<usize>
 }
@@ -309,7 +309,7 @@ fn expr_to_fact<'a>(expr: Expr<'a>) -> Option<Vec<Fact<'a>>> {
 }
 
 impl Assignments {
-    pub fn new() -> Assignments { Assignments { vars: HashMap::new(), vals: vec![], binds: vec![] } }
+    pub fn new() -> Assignments { Assignments { vars: vec![], vals: vec![], binds: vec![] } }
     fn get_val(&self, base: &V) -> V {
         match base {
             &V::Var(mut i) => {
@@ -323,16 +323,22 @@ impl Assignments {
             _ => base.clone()
         }
     }
-    fn to_val(&mut self, expr: &IExpr, suf: usize) -> V {
+    fn ensure_level(&mut self, level: usize) {
+        while level >= self.vars.len() {
+            self.vars.push(HashMap::new())
+        }
+    }
+    fn to_val(&mut self, expr: &IExpr, level: usize) -> V {
         match expr {
             &IExpr::Var(x) => {
+                self.ensure_level(level);
                 let vals = &mut self.vals;
-                V::Var(*self.vars.entry((x, suf)).or_insert_with(|| { let i = vals.len(); vals.push(V::Var(i)); i }))
+                V::Var(*unsafe { self.vars.get_unchecked_mut(level) }.entry(x).or_insert_with(|| { let i = vals.len(); vals.push(V::Var(i)); i }))
             },
             &IExpr::Pred(name, ref args) => {
                 let mut v_args = Vec::with_capacity(args.len());
                 for arg in args.iter() {
-                    v_args.push(self.to_val(arg, suf));
+                    v_args.push(self.to_val(arg, level));
                 }
                 V::Pred(name, v_args)
             }
