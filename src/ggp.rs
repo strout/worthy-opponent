@@ -422,7 +422,6 @@ pub fn sexpr_to_db<'a>(sexpr: &SExpr<'a>) -> Option<(DB, Labeler<'a>)> {
 impl DB {
     pub fn new() -> DB { DB { facts: HashMap::new() } }
     pub fn query<'b>(&'b self, expr: &'b IExpr) -> Box<Iterator<Item=IExpr> + 'b> {
-        // TODO is Rc/RefCell really needed here? It's just a counter; isn't there a nicer way?
         let mut asg = Assignments::new();
         let expr = asg.to_val(expr, &mut HashMap::new());
         Box::new(self.query_inner(expr.clone(), asg).map(move |asg| { asg.from_val(&expr) }))
