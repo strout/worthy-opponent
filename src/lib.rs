@@ -9,6 +9,7 @@ extern crate test;
 extern crate quickcheck;
 
 mod basics;
+pub mod labeler;
 pub mod connectfour;
 pub mod game;
 pub mod ggp;
