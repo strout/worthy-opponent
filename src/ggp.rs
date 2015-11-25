@@ -45,7 +45,6 @@ const HACKY_HACK : [&'static str; 256] = ["0", "1", "2", "3", "4", "5", "6", "7"
 
 #[derive(Clone, Debug)]
 pub struct Assignments {
-    vars: Vec<(HashMap<usize, usize>, usize)>,
     vals: Vec<ValExpr>,
     binds: Vec<usize>
 }
@@ -312,7 +311,7 @@ fn expr_to_fact<'a>(expr: Expr<'a>) -> Option<Vec<Fact<'a>>> {
 }
 
 impl Assignments {
-    pub fn new() -> Assignments { Assignments { vars: vec![], vals: vec![], binds: vec![] } }
+    pub fn new() -> Assignments { Assignments { vals: vec![], binds: vec![] } }
     fn get_val(&self, base: &V) -> V {
         match base {
             &V::Var(mut i) => {
@@ -326,22 +325,15 @@ impl Assignments {
             _ => base.clone()
         }
     }
-    fn ensure_level(&mut self, level: usize) {
-        while level >= self.vars.len() {
-            self.vars.push((HashMap::new(), self.vals.len()))
-        }
-    }
-    fn to_val(&mut self, expr: &IExpr, level: usize) -> V {
+    fn to_val(&mut self, expr: &IExpr, vars: &mut HashMap<usize, usize>) -> V {
         match expr {
             &IExpr::Var(x) => {
-                self.ensure_level(level);
-                let vals = &mut self.vals;
-                V::Var(*unsafe { self.vars.get_unchecked_mut(level) }.0.entry(x).or_insert_with(|| { let i = vals.len(); vals.push(V::Var(i)); i }))
+                V::Var(*vars.entry(x).or_insert_with(|| { let i = self.vals.len(); self.vals.push(V::Var(i)); i }))
             },
             &IExpr::Pred(name, ref args) => {
                 let mut v_args = Vec::with_capacity(args.len());
                 for arg in args.iter() {
-                    v_args.push(self.to_val(arg, level));
+                    v_args.push(self.to_val(arg, vars));
                 }
                 V::Pred(name, v_args)
             }
@@ -378,13 +370,6 @@ impl Assignments {
         }
         self.vals[var] = val;
         self.binds.push(var)
-    }
-    fn clear_level(&mut self, l: usize) {
-        if self.vars.len() > l {
-            // let x = self.vars[l].1;
-            // self.vals.truncate(x);
-            self.vars.truncate(l);
-        }
     }
     fn unwind(&mut self, depth: usize) {
         while depth < self.binds.len() {
@@ -425,7 +410,7 @@ impl DB {
     pub fn query<'b>(&'b self, expr: &'b IExpr) -> Box<Iterator<Item=IExpr> + 'b> {
         // TODO is Rc/RefCell really needed here? It's just a counter; isn't there a nicer way?
         let mut asg = Assignments::new();
-        let expr = asg.to_val(expr, 0);
+        let expr = asg.to_val(expr, &mut HashMap::new());
         Box::new(self.query_inner(expr.clone(), asg).map(move |asg| { asg.from_val(&expr) }))
     }
     pub fn check(&self, e: &IExpr) -> bool {
@@ -443,35 +428,36 @@ impl DB {
             V::Var(_) => panic!("Can't query for a variable."),
             V::Pred(n, _) => self.facts.get(&n).expect("Can't query something that isn't in the database.")
         };
-        let r_depth = asg.vars.len(); // TODO encapsulate
         Box::new(relevant.iter().flat_map(move |&IFact { ref head, ref body }| {
             let mut asg = asg.clone();
-            let head = asg.to_val(head, r_depth);
-            body.iter().fold(Box::new(asg.unify_val(&expr, &head).into_iter()) as Box<Iterator<Item=Assignments> + 'b>, move |asgs, t| {
+            let mut vars = HashMap::new();
+            let head = asg.to_val(head, &mut vars);
+            body.iter().fold(Box::new(asg.unify_val(&expr, &head).map(|asg| (asg, vars)).into_iter()) as Box<Iterator<Item=(Assignments, HashMap<usize, usize>)> + 'b>, move |asgs, t| {
                 match *t {
                     IThing::True(ref p) => {
-                        Box::new(asgs.flat_map(move |mut asg| {
-                            let p = asg.to_val(p, r_depth);
-                            self.query_inner(p, asg)
+                        Box::new(asgs.flat_map(move |(mut asg, mut vars)| {
+                            let p = asg.to_val(p, &mut vars);
+                            self.query_inner(p, asg).map(move |asg| (asg, vars.clone()))
                         }))
                     },
                     IThing::False(ref n) => {
-                        Box::new(asgs.filter(move |asg| {
+                        Box::new(asgs.filter(move |&(ref asg, ref vars)| {
                             let mut asg = asg.clone();
-                            let n = asg.to_val(n, r_depth);
+                            let n = asg.to_val(n, &mut vars.clone()); // TODO vars unnecessary
                             self.query_inner(n, asg).next().is_none()
                         }))
                     },
                     IThing::Distinct(ref l, ref r) => {
-                        Box::new(asgs.filter(move |asg| {
+                        Box::new(asgs.filter(move |&(ref asg, ref vars)| {
                             let mut asg = asg.clone();
-                            let l = asg.to_val(l, r_depth);
-                            let r = asg.to_val(r, r_depth);
+                            let mut vars = vars.clone(); // TODO unnecessary
+                            let l = asg.to_val(l, &mut vars);
+                            let r = asg.to_val(r, &mut vars);
                             asg.unify_val(&l, &r).is_err()
                         }))
                     }
                 }
-            }).map(move |mut asg| { asg.clear_level(r_depth); asg })
+            }).map(move |(asg, _)| asg)
         }))
     }
 }
