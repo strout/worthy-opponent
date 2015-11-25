@@ -339,6 +339,20 @@ impl Assignments {
             }
         }
     }
+    fn to_val_immut(&self, expr: &IExpr, vars: &HashMap<usize, usize>) -> V {
+        match expr {
+            &IExpr::Var(x) => {
+                V::Var(vars[&x])
+            },
+            &IExpr::Pred(name, ref args) => {
+                let mut v_args = Vec::with_capacity(args.len());
+                for arg in args.iter() {
+                    v_args.push(self.to_val_immut(arg, vars));
+                }
+                V::Pred(name, v_args)
+            }
+        }
+    }
     fn from_val(&self, val: &V) -> IExpr {
         match self.get_val(val) {
             V::Var(i) => IExpr::Var(i),
@@ -442,17 +456,16 @@ impl DB {
                     },
                     IThing::False(ref n) => {
                         Box::new(asgs.filter(move |&(ref asg, ref vars)| {
-                            let mut asg = asg.clone();
-                            let n = asg.to_val(n, &mut vars.clone()); // TODO vars unnecessary
+                            let asg = asg.clone();
+                            let n = asg.to_val_immut(n, vars);
                             self.query_inner(n, asg).next().is_none()
                         }))
                     },
                     IThing::Distinct(ref l, ref r) => {
                         Box::new(asgs.filter(move |&(ref asg, ref vars)| {
-                            let mut asg = asg.clone();
-                            let mut vars = vars.clone(); // TODO unnecessary
-                            let l = asg.to_val(l, &mut vars);
-                            let r = asg.to_val(r, &mut vars);
+                            let asg = asg.clone();
+                            let l = asg.to_val_immut(l, &vars);
+                            let r = asg.to_val_immut(r, &vars);
                             asg.unify_val(&l, &r).is_err()
                         }))
                     }
