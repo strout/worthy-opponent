@@ -327,6 +327,12 @@ impl Assignments {
             V::Pred(name, args) => IExpr::Pred(name, args.iter().map(|arg| self.from_val(arg)).collect())
         }
     }
+    fn check_val(&self, left: &V, right: &V) -> bool {
+        match (self.get_val(left), self.get_val(right)) {
+            (V::Pred(l_name, l_args), V::Pred(r_name, r_args)) => l_name == r_name && l_args.iter().zip(r_args.iter()).all(|(l, r)| self.check_val(l, r)),
+            (V::Var(_), _) | (_, V::Var(_)) => panic!("check_val shouldn't be called with unresolved vars.")
+        }
+    }
     fn unify_val(mut self, left: &V, right: &V) -> Result<Assignments, Assignments> {
         match (self.get_val(left), self.get_val(right)) {
             (V::Pred(l_name, l_args), V::Pred(r_name, r_args)) => if l_name == r_name {
@@ -423,17 +429,15 @@ impl DB {
                     },
                     IThing::False(ref n) => {
                         Box::new(asgs.filter(move |&(ref asg, ref vars)| {
-                            let asg = asg.clone();
                             let n = asg.to_val_immut(n, vars);
-                            self.query_inner(n, asg).next().is_none()
+                            self.query_inner(n, asg.clone()).next().is_none()
                         }))
                     },
                     IThing::Distinct(ref l, ref r) => {
                         Box::new(asgs.filter(move |&(ref asg, ref vars)| {
-                            let asg = asg.clone();
                             let l = asg.to_val_immut(l, &vars);
                             let r = asg.to_val_immut(r, &vars);
-                            asg.unify_val(&l, &r).is_err()
+                            !asg.check_val(&l, &r)
                         }))
                     }
                 }
