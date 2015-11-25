@@ -7,7 +7,6 @@ use std::result::Result;
 pub use self::Expr::*;
 use self::{ValExpr as V};
 use std::borrow::Cow;
-use std::mem::swap;
 use std::usize;
 use labeler::Labeler;
 
@@ -349,13 +348,7 @@ impl Assignments {
             (V::Var(i), x) | (x, V::Var(i)) => { self.bind(i, x); Ok(self) },
         }
     }
-    fn bind(&mut self, mut var: usize, mut val: ValExpr) {
-        if let V::Var(ref mut x) = val {
-            if *x == var { return }
-            else if *x > var {
-                swap(&mut var, x);
-            }
-        }
+    fn bind(&mut self, var: usize, val: ValExpr) {
         self.vals[var] = val;
         self.binds.push(var)
     }
