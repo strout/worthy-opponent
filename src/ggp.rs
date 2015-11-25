@@ -7,9 +7,8 @@ use std::result::Result;
 pub use self::Expr::*;
 use self::{ValExpr as V};
 use std::borrow::Cow;
-use std::rc::Rc;
-use std::cell::RefCell;
 use std::usize;
+use std::mem::swap;
 
 #[derive(Clone)]
 pub struct Labeler<'a> {
@@ -46,7 +45,7 @@ const HACKY_HACK : [&'static str; 256] = ["0", "1", "2", "3", "4", "5", "6", "7"
 
 #[derive(Clone, Debug)]
 pub struct Assignments {
-    vars: Vec<HashMap<usize, usize>>,
+    vars: Vec<(HashMap<usize, usize>, usize)>,
     vals: Vec<ValExpr>,
     binds: Vec<usize>
 }
@@ -329,7 +328,7 @@ impl Assignments {
     }
     fn ensure_level(&mut self, level: usize) {
         while level >= self.vars.len() {
-            self.vars.push(HashMap::new())
+            self.vars.push((HashMap::new(), self.vals.len()))
         }
     }
     fn to_val(&mut self, expr: &IExpr, level: usize) -> V {
@@ -337,7 +336,7 @@ impl Assignments {
             &IExpr::Var(x) => {
                 self.ensure_level(level);
                 let vals = &mut self.vals;
-                V::Var(*unsafe { self.vars.get_unchecked_mut(level) }.entry(x).or_insert_with(|| { let i = vals.len(); vals.push(V::Var(i)); i }))
+                V::Var(*unsafe { self.vars.get_unchecked_mut(level) }.0.entry(x).or_insert_with(|| { let i = vals.len(); vals.push(V::Var(i)); i }))
             },
             &IExpr::Pred(name, ref args) => {
                 let mut v_args = Vec::with_capacity(args.len());
@@ -354,30 +353,46 @@ impl Assignments {
             V::Pred(name, args) => IExpr::Pred(name, args.iter().map(|arg| self.from_val(arg)).collect())
         }
     }
-    fn unify(mut self, left: &IExpr, l_suf: usize, right: &IExpr, r_suf: usize) -> Result<Assignments, Assignments> {
-        let l_val = self.to_val(left, l_suf);
-        let r_val = self.to_val(right, r_suf);
-        if self.unify_val(&l_val, &r_val) {
-            Ok(self)
-        } else {
-            Err(self)
-        }
-    }
-    fn unify_val(&mut self, left: &V, right: &V) -> bool {
+    fn unify_val(mut self, left: &V, right: &V) -> Result<Assignments, Assignments> {
         match (self.get_val(left), self.get_val(right)) {
-            (V::Pred(l_name, l_args), V::Pred(r_name, r_args)) => l_name == r_name && l_args.iter().zip(r_args.iter()).all(|(l, r)| self.unify_val(l, r)),
-            (V::Var(i), V::Var(j)) => { if i != j { self.bind(i, V::Var(j)) }; true },
-            (V::Var(i), x) | (x, V::Var(i)) => { self.bind(i, x); true },
+            (V::Pred(l_name, l_args), V::Pred(r_name, r_args)) => if l_name == r_name {
+                for (l, r) in l_args.iter().zip(r_args.iter()) {
+                    match self.unify_val(l, r) {
+                        Ok(slf) => self = slf,
+                        Err(slf) => return Err(slf)
+                    }
+                }
+                Ok(self)
+            } else {
+                Err(self)
+            },
+            (V::Var(i), x) | (x, V::Var(i)) => { self.bind(i, x); Ok(self) },
         }
     }
-    fn bind(&mut self, var: usize, val: ValExpr) {
+    fn bind(&mut self, mut var: usize, mut val: ValExpr) {
+        if let V::Var(ref mut x) = val {
+            if *x == var { return }
+            else if *x > var {
+                swap(&mut var, x);
+            }
+        }
         self.vals[var] = val;
         self.binds.push(var)
+    }
+    fn clear_level(&mut self, l: usize) {
+        if self.vars.len() > l {
+            // let x = self.vars[l].1;
+            // self.vals.truncate(x);
+            self.vars.truncate(l);
+        }
     }
     fn unwind(&mut self, depth: usize) {
         while depth < self.binds.len() {
             let i = self.binds.pop().unwrap();
-            self.vals[i] = V::Var(i)
+            if let Some(v) = self.vals.get_mut(i)
+            {
+                *v = V::Var(i)
+            }
         }
     }
 }
@@ -409,7 +424,9 @@ impl DB {
     pub fn new() -> DB { DB { facts: HashMap::new() } }
     pub fn query<'b>(&'b self, expr: &'b IExpr) -> Box<Iterator<Item=IExpr> + 'b> {
         // TODO is Rc/RefCell really needed here? It's just a counter; isn't there a nicer way?
-        Box::new(self.query_inner(expr, Assignments::new(), 0, Rc::new(RefCell::new(0))).map(move |mut asg| { let val = asg.to_val(expr, 0); asg.from_val(&val) }))
+        let mut asg = Assignments::new();
+        let expr = asg.to_val(expr, 0);
+        Box::new(self.query_inner(expr.clone(), asg).map(move |asg| { asg.from_val(&expr) }))
     }
     pub fn check(&self, e: &IExpr) -> bool {
         self.query(e).next().is_some()
@@ -421,122 +438,41 @@ impl DB {
         };
         e.or_insert(vec![]).push(f)
     }
-    fn query_inner<'b>(&'b self, expr: &'b IExpr, asg: Assignments, depth: usize, max_depth: Rc<RefCell<usize>>) -> Box<Iterator<Item=Assignments> + 'b> {
+    fn query_inner<'b>(&'b self, expr: ValExpr, asg: Assignments) -> Box<Iterator<Item=Assignments> + 'b> {
         let relevant = match expr {
-            &IExpr::Var(_) => panic!("Can't query for a variable."),
-            &IExpr::Pred(n, _) => self.facts.get(&n).expect("Can't query something that isn't in the database.")
+            V::Var(_) => panic!("Can't query for a variable."),
+            V::Pred(n, _) => self.facts.get(&n).expect("Can't query something that isn't in the database.")
         };
+        let r_depth = asg.vars.len(); // TODO encapsulate
         Box::new(relevant.iter().flat_map(move |&IFact { ref head, ref body }| {
-            let r_depth = {
-                let mut md = max_depth.borrow_mut();
-                *md += 1;
-                *md
-            };
-            body.iter().fold((Box::new(asg.clone().unify(expr, depth, &head, r_depth).into_iter()) as Box<Iterator<Item=Assignments> + 'b>, max_depth.clone()), move |(asgs, max_depth), t| {
+            let mut asg = asg.clone();
+            let head = asg.to_val(head, r_depth);
+            body.iter().fold(Box::new(asg.unify_val(&expr, &head).into_iter()) as Box<Iterator<Item=Assignments> + 'b>, move |asgs, t| {
                 match *t {
                     IThing::True(ref p) => {
-                        let md = max_depth.clone();
-                        (Box::new(asgs.flat_map(move |asg| self.query_inner(p, asg, r_depth, max_depth.clone()))), md)
+                        Box::new(asgs.flat_map(move |mut asg| {
+                            let p = asg.to_val(p, r_depth);
+                            self.query_inner(p, asg)
+                        }))
                     },
                     IThing::False(ref n) => {
-                        let md = max_depth.clone();
-                        (Box::new(asgs.filter(move |asg| self.query_inner(n, asg.clone(), r_depth, max_depth.clone()).next().is_none())), md)
+                        Box::new(asgs.filter(move |asg| {
+                            let mut asg = asg.clone();
+                            let n = asg.to_val(n, r_depth);
+                            self.query_inner(n, asg).next().is_none()
+                        }))
                     },
                     IThing::Distinct(ref l, ref r) => {
-                        (Box::new(asgs.filter(move |asg| asg.clone().unify(l, r_depth, r, r_depth).is_err())), max_depth)
+                        Box::new(asgs.filter(move |asg| {
+                            let mut asg = asg.clone();
+                            let l = asg.to_val(l, r_depth);
+                            let r = asg.to_val(r, r_depth);
+                            asg.unify_val(&l, &r).is_err()
+                        }))
                     }
                 }
-            }).0
+            }).map(move |mut asg| { asg.clear_level(r_depth); asg })
         }))
-    }
-}
-
-pub struct Iter<'a> {
-    asg: &'a mut Assignments,
-    db: &'a DB,
-    stack: Vec<(usize, usize, usize)>,
-    level: usize
-}
-
-impl<'a> Iter<'a> {
-    pub fn with_assignments(asg: &'a mut Assignments, level: usize, db: &'a DB) -> Iter<'a> {
-        Iter { asg: asg, db: db, stack: vec![], level: level }
-    }
-    fn to_val(&mut self, expr: &IExpr) -> ValExpr {
-        let lev = self.level();
-        self.asg.to_val(expr, lev)
-    }
-    fn add_goal(&mut self, goal: &IExpr) {
-        let val = self.to_val(goal);
-        let goal = self.asg.vals.len();
-        self.asg.vals.push(V::Var(goal));
-        self.asg.bind(goal, val);
-        let depth = self.asg.binds.len();
-        self.stack.push((goal, depth, 0))
-    }
-    fn level(&self) -> usize { self.stack.len() + self.level }
-}
-
-impl<'a> Iterator for Iter<'a> {
-    type Item = ();
-    fn next(&mut self) -> Option<()> {
-        let frame = self.stack.pop();
-        match frame {
-            None => None,
-            Some((goal, depth, cur)) => {
-                self.asg.unwind(depth);
-                let facts = match self.asg.vals[goal] {
-                    V::Pred(n, _) => self.db.facts.get(&n).expect("Can't query for facts not in the database"),
-                    V::Var(_) => panic!("Can't query for a variable")
-                };
-                match facts.get(cur) {
-                    None => {
-                        self.next()
-                    }
-                    Some(&IFact { ref head, ref body }) => {
-                        self.stack.push((goal, depth, cur + 1));
-                        let head = self.to_val(head);
-                        if self.asg.unify_val(&V::Var(goal), &head) {
-                            match body.first() {
-                                None => {
-                                    Some(())
-                                },
-                                Some(&IThing::True(ref p)) => {
-                                    self.add_goal(p);
-                                    self.next()
-                                },
-                                Some(&IThing::False(ref n)) => {
-                                    let ok = {
-                                        let lev = self.level();
-                                        let mut nested = Iter::with_assignments(self.asg, lev, self.db);
-                                        nested.add_goal(n);
-                                        nested.next().is_none()
-                                    };
-                                    if ok {
-                                        Some(())
-                                    } else {
-                                        self.next()
-                                    }
-                                },
-                                Some(&IThing::Distinct(ref l, ref r)) => {
-                                    let l = self.to_val(l);
-                                    let r = self.to_val(r);
-                                    if self.asg.unify_val(&l, &r) {
-                                        self.next()
-                                    } else {
-                                        Some(())
-                                    }
-                                }
-                            }
-                            // TODO figure out how to handle multiple goals (to allow matching
-                            // _all_ of the previous things
-                        } else {
-                            self.next()
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -849,18 +785,5 @@ mod tests {
         db.add(fact(atom("open"), vec![pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])], vec![], vec![]).thru(&mut labeler));
 
         (db, labeler)
-    }
-
-    #[test]
-    fn iterator_basics() {
-        let mut db = DB::new();
-        let mut labeler = Labeler::new();
-        db.add(fact(pred("man", vec![atom("socrates")]), vec![], vec![], vec![]).thru(&mut labeler));
-        db.add(fact(pred("man", vec![atom("aristotle")]), vec![], vec![], vec![]).thru(&mut labeler));
-        db.add(fact(pred("mortal", vec![var("X")]), vec![pred("man", vec![var("X")])], vec![], vec![]).thru(&mut labeler));
-        let mut asg = Assignments::new();
-        let mut iter = Iter::with_assignments(&mut asg, 0, &mut db);
-        iter.add_goal(&pred("mortal", vec![var("X")]).thru(&mut labeler));
-        assert_eq!(2, iter.count());
     }
 }
