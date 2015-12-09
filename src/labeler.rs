@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::usize;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Labeler<'a> {
     to: HashMap<&'a str, usize>,
     from: Vec<&'a str>

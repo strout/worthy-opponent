@@ -2,24 +2,33 @@
 
 use std::iter::*;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt::{Display, Formatter, Error};
 use std::result::Result;
 pub use self::Expr::*;
-use self::{ValExpr as V};
+use self::{ValArg as V};
 use std::borrow::Cow;
 use std::usize;
 use labeler::Labeler;
+use std::cmp::max;
 
 #[derive(Clone, Debug)]
 pub struct Assignments {
-    vals: Vec<ValExpr>,
+    vals: Vec<ValArg>,
     binds: Vec<usize>
 }
 
 #[derive(Clone, Debug)]
-enum ValExpr {
+enum ValArg {
+    Const(usize),
     Var(usize),
-    Pred(usize, Vec<ValExpr>)
+    Filler
+}
+
+#[derive(Clone, Debug)]
+struct ValExpr {
+    name: usize,
+    args: Vec<ValArg>
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -48,54 +57,157 @@ impl<'a> Display for Expr<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum IExpr {
+pub enum IArg {
+    Const(usize),
     Var(usize),
-    Pred(usize, Vec<IExpr>)
+    Filler
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct IExpr {
+    name: usize,
+    args: Vec<IArg>
 }
 
 impl Display for IExpr {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
         let write_interned = |fmt: &mut _, x: usize| if x > usize::MAX - 256 { (usize::MAX - x).fmt(fmt) } else { write!(fmt, "${}", x) };
-        match self {
-            &IExpr::Var(x) => write!(fmt, "?{}", x),
-            &IExpr::Pred(x, ref args) => {
-                if args.is_empty() {
-                    write_interned(fmt, x)
-                } else {
-                    try!(write!(fmt, "("));
-                    try!(write_interned(fmt, x));
-                    for arg in args.iter() {
-                        try!(write!(fmt, " {}", arg));
-                    }
-                    write!(fmt, ")")
-                }
+        if self.args.is_empty() {
+            write_interned(fmt, self.name)
+        } else {
+            try!(write!(fmt, "("));
+            try!(write_interned(fmt, self.name));
+            for arg in self.args.iter() {
+                try!(write!(fmt, " {}", arg));
             }
+            write!(fmt, ")")
+        }
+    }
+}
+
+impl Display for IArg {
+    fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
+        match *self {
+            IArg::Const(x) => x.fmt(fmt),
+            IArg::Var(x) => write!(fmt, "?{}", x),
+            IArg::Filler => "?".fmt(fmt)
         }
     }
 }
 
 impl<'a> Expr<'a> {
-    pub fn thru(&self, labeler: &mut Labeler<'a>) -> IExpr {
-        match self {
-            &Var(ref x) => IExpr::Var(labeler.put(match x { &Cow::Borrowed(x) => x, _ => panic!("I don't know what to do here.") })),
-            &Pred(ref n, ref args) => IExpr::Pred(labeler.put(n), args.iter().map(|x| x.thru(labeler)).collect())
+    fn record_lens(&self, lens: &mut HashMap<&'a str, usize>) -> usize { // TODO each one should have some kind of inner_lens as well!
+        match *self {
+            Var(_) => 1,
+            Pred(n, ref args) => {
+                let mut largs = 0;
+                for arg in args {
+                    largs += arg.record_lens(lens)
+                }
+                1 + match lens.entry(n) {
+                    Entry::Vacant(v) => { v.insert(largs); largs },
+                    Entry::Occupied(mut o) => {
+                        let n = max(*o.get(), largs);
+                        o.insert(n);
+                        n
+                    }
+                }
+            }
         }
     }
-    pub fn try_thru(&self, labeler: &Labeler) -> Option<IExpr> {
-        match self {
-            &Var(ref x) => labeler.check(&*x).map(|x| IExpr::Var(x)),
-            &Pred(ref n, ref args) => labeler.check(n).and_then(|n| args.iter().fold(Some(vec![]), |acc, arg| acc.and_then(|mut acc| arg.try_thru(labeler).map(|x| { acc.push(x); acc }))).map(|args| IExpr::Pred(n, args)))
+    pub fn try_thru(&self, labeler: &Labeler, lens: &HashMap<&str, usize>) -> IExpr {
+        match *self {
+            Var(_) => panic!("Can't have a var at the top level."),
+            Pred(n, ref args) => {
+                let mut iargs = repeat(IArg::Filler).take(lens[n]).collect::<Vec<_>>();
+                let mut i = 0;
+                for arg in args {
+                    match *arg {
+                        Var(Cow::Borrowed(x)) => {
+                            iargs[i] = IArg::Var(labeler.check(x).unwrap());
+                            i += 1
+                        }
+                        Var(Cow::Owned(_)) => panic!("Don't use owned vars"),
+                        Pred(_, _) => {
+                            let IExpr { name, args: xs } = arg.try_thru(labeler, lens);
+                            iargs[i] = IArg::Const(name);
+                            i += 1;
+                            for x in xs {
+                                iargs[i] = x;
+                                i += 1;
+                            }
+                        }
+                    }
+                }
+                IExpr { name: labeler.check(n).unwrap(), args: iargs }
+            }
+        }
+    }
+    pub fn arg_thru(&self, labeler: &mut Labeler<'a>) -> IArg {
+        match *self {
+            Var(Cow::Borrowed(n)) => IArg::Var(labeler.put(n)),
+            Var(Cow::Owned(_)) => panic!("What are you doing with an owned string?"),
+            Pred(n, _) => IArg::Const(labeler.put(n))
+        }
+    }
+    pub fn thru(&self, labeler: &mut Labeler<'a>, lens: &HashMap<&str, usize>) -> IExpr {
+        match *self {
+            Var(_) => panic!("Can't have a var at the top level."),
+            Pred(n, ref args) => {
+                let mut iargs = repeat(IArg::Filler).take(lens[n]).collect::<Vec<_>>();
+                let mut i = 0;
+                for arg in args {
+                    match *arg {
+                        Var(Cow::Borrowed(x)) => {
+                            iargs[i] = IArg::Var(labeler.put(x));
+                            i += 1
+                        }
+                        Var(Cow::Owned(_)) => panic!("Don't use owned vars"),
+                        Pred(_, _) => {
+                            let IExpr { name, args: xs } = arg.thru(labeler, lens);
+                            iargs[i] = IArg::Const(name);
+                            i += 1;
+                            for x in xs {
+                                iargs[i] = x;
+                                i += 1;
+                            }
+                        }
+                    }
+                }
+                IExpr { name: labeler.put(n), args: iargs }
+            }
         }
     }
 }
 
 impl IExpr {
-    pub fn thru<'a>(&self, labeler: &Labeler<'a>) -> Option<Expr<'a>> {
-        match self {
-            &IExpr::Var(x) => labeler.get(x).map(|x| Var(x.into())).or_else(|| Some(Var(x.to_string().into()))),
-            &IExpr::Pred(n, ref args) => labeler.get(n).and_then(|n| args.iter().fold(Some(vec![]), |acc, arg| acc.and_then(|mut acc| arg.thru(labeler).map(|x| { acc.push(x); acc }))).map(|args| Pred(n, args)))
-        }
+    pub fn thru<'a>(&self, labeler: &Labeler<'a>, lens: &HashMap<&str, usize>) -> Option<Expr<'a>> {
+        go_thru(self.name, &self.args[..], labeler, lens)
     }
+}
+
+fn go_thru<'a>(name: usize, args: &[IArg], labeler: &Labeler<'a>, lens: &HashMap<&str, usize>) -> Option<Expr<'a>> {
+    labeler.get(name).and_then(|n| {
+        let mut eargs = vec![];
+        let mut i = 0;
+        while i < args.len() {
+            i += 1;
+            let a = match args[i - 1] {
+                IArg::Filler => continue,
+                IArg::Var(n) => labeler.get(n).map(|x| Var(x.into())),
+                IArg::Const(x) => labeler.get(x).and_then(|n| {
+                    let l = lens[n];
+                    i += l;
+                    go_thru(x, &args[i-l..i], labeler, lens)
+                })
+            };
+            match a {
+                None => return None,
+                Some(a) => eargs.push(a)
+            }
+        }
+        Some(Pred(n, eargs))
+    })
 }
 
 pub type Parsed<'a, T> = Result<(T, &'a str), ()>;
@@ -173,7 +285,7 @@ pub fn sexpr_to_expr<'a>(sexpr: &SExpr<'a>) -> Option<Expr<'a>> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Thing<'a> {
     True(Expr<'a>),
     False(Expr<'a>),
@@ -181,39 +293,55 @@ pub enum Thing<'a> {
 }
 
 impl<'a> Thing<'a> {
-    fn thru(&self, labeler: &mut Labeler<'a>) -> IThing {
+    fn record_lens(&self, lens: &mut HashMap<&'a str, usize>) {
         match *self {
-            Thing::True(ref expr) => IThing::True(expr.thru(labeler)),
-            Thing::False(ref expr) => IThing::False(expr.thru(labeler)),
-            Thing::Distinct(ref left, ref right) => IThing::Distinct(left.thru(labeler), right.thru(labeler))
+            Thing::True(ref expr) => { expr.record_lens(lens); },
+            Thing::False(ref expr) => { expr.record_lens(lens); },
+            Thing::Distinct(ref left, ref right) => {
+                left.record_lens(lens);
+                right.record_lens(lens);
+            }
+        }
+    }
+    fn thru(&self, labeler: &mut Labeler<'a>, lens: &HashMap<&str, usize>) -> IThing {
+        match *self {
+            Thing::True(ref expr) => IThing::True(expr.thru(labeler, lens)),
+            Thing::False(ref expr) => IThing::False(expr.thru(labeler, lens)),
+            Thing::Distinct(ref left, ref right) => IThing::Distinct(left.arg_thru(labeler), right.arg_thru(labeler))
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Fact<'a> {
     head: Expr<'a>,
     body: Vec<Thing<'a>>
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum IThing {
     True(IExpr),
     False(IExpr),
-    Distinct(IExpr, IExpr)
+    Distinct(IArg, IArg)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IFact {
     head: IExpr,
     body: Vec<IThing>,
 }
 
 impl<'a> Fact<'a> {
-    fn thru(&self, labeler: &mut Labeler<'a>) -> IFact {
+    fn record_lens(&self, lens: &mut HashMap<&'a str, usize>) {
+        self.head.record_lens(lens);
+        for x in self.body.iter() {
+            x.record_lens(lens);
+        }
+    }
+    fn thru(&self, labeler: &mut Labeler<'a>, lens: &HashMap<&str, usize>) -> IFact {
         IFact {
-            head: self.head.thru(labeler),
-            body: self.body.iter().map(|x| x.thru(labeler)).collect::<Vec<_>>(),
+            head: self.head.thru(labeler, lens),
+            body: self.body.iter().map(|x| x.thru(labeler, lens)).collect::<Vec<_>>(),
         }
     }
 }
@@ -292,63 +420,57 @@ impl Assignments {
             _ => base.clone()
         }
     }
-    fn to_val(&mut self, expr: &IExpr, vars: &mut HashMap<usize, usize>) -> V {
-        match expr {
-            &IExpr::Var(x) => {
-                V::Var(*vars.entry(x).or_insert_with(|| { let i = self.vals.len(); self.vals.push(V::Var(i)); i }))
-            },
-            &IExpr::Pred(name, ref args) => {
-                let mut v_args = Vec::with_capacity(args.len());
-                for arg in args.iter() {
-                    v_args.push(self.to_val(arg, vars));
-                }
-                V::Pred(name, v_args)
-            }
+    fn to_val(&mut self, &IExpr { name, ref args }: &IExpr, vars: &mut HashMap<usize, usize>) -> ValExpr {
+        let mut vargs = Vec::with_capacity(args.len());
+        for arg in args {
+            vargs.push(match *arg {
+                IArg::Const(x) => V::Const(x),
+                IArg::Var(x) => V::Var(*vars.entry(x).or_insert_with(|| { let i = self.vals.len(); self.vals.push(V::Var(i)); i })),
+                IArg::Filler => V::Filler
+            })
+        }
+        ValExpr { name: name, args: vargs }
+    }
+    fn to_valarg_immut(&self, arg: &IArg, vars: &HashMap<usize, usize>) -> ValArg {
+        match *arg {
+                IArg::Const(x) => V::Const(x),
+                IArg::Var(x) => V::Var(vars[&x]),
+                IArg::Filler => V::Filler
         }
     }
-    fn to_val_immut(&self, expr: &IExpr, vars: &HashMap<usize, usize>) -> V {
-        match expr {
-            &IExpr::Var(x) => {
-                V::Var(vars[&x])
-            },
-            &IExpr::Pred(name, ref args) => {
-                let mut v_args = Vec::with_capacity(args.len());
-                for arg in args.iter() {
-                    v_args.push(self.to_val_immut(arg, vars));
-                }
-                V::Pred(name, v_args)
-            }
+    fn to_val_immut(&self, &IExpr { name, ref args }: &IExpr, vars: &HashMap<usize, usize>) -> ValExpr {
+        let mut vargs = Vec::with_capacity(args.len());
+        for arg in args {
+            vargs.push(self.to_valarg_immut(arg, vars))
         }
+        ValExpr { name: name, args: vargs }
     }
-    fn from_val(&self, val: &V) -> IExpr {
-        match self.get_val(val) {
-            V::Var(i) => IExpr::Var(i),
-            V::Pred(name, args) => IExpr::Pred(name, args.iter().map(|arg| self.from_val(arg)).collect())
-        }
+    fn from_val(&self, val: &ValExpr) -> IExpr {
+        IExpr { name: val.name, args: val.args.iter().map(|arg| match self.get_val(arg) {
+            V::Const(x) => IArg::Const(x),
+            V::Var(x) => IArg::Var(x),
+            V::Filler => IArg::Filler
+        }).collect() }
     }
-    fn check_val(&self, left: &V, right: &V) -> bool {
+    fn check_val(&self, left: &ValArg, right: &ValArg) -> bool {
         match (self.get_val(left), self.get_val(right)) {
-            (V::Pred(l_name, l_args), V::Pred(r_name, r_args)) => l_name == r_name && l_args.iter().zip(r_args.iter()).all(|(l, r)| self.check_val(l, r)),
-            (V::Var(_), _) | (_, V::Var(_)) => panic!("check_val shouldn't be called with unresolved vars.")
+            (V::Const(x), V::Const(y)) => x == y,
+            (V::Filler, V::Filler) => true,
+            (V::Var(_), _) | (_, V::Var(_)) => panic!("check_val shouldn't be called with unresolved vars"),
+            (V::Const(_), V::Filler) | (V::Filler, V::Const(_)) => false
         }
     }
-    fn unify_val(mut self, left: &V, right: &V) -> Result<Assignments, Assignments> {
-        match (self.get_val(left), self.get_val(right)) {
-            (V::Pred(l_name, l_args), V::Pred(r_name, r_args)) => if l_name == r_name {
-                for (l, r) in l_args.iter().zip(r_args.iter()) {
-                    match self.unify_val(l, r) {
-                        Ok(slf) => self = slf,
-                        Err(slf) => return Err(slf)
-                    }
-                }
-                Ok(self)
-            } else {
-                Err(self)
-            },
-            (V::Var(i), x) | (x, V::Var(i)) => { self.bind(i, x); Ok(self) },
-        }
+    fn unify_val(mut self, left: &ValExpr, right: &ValExpr) -> Result<Assignments, Assignments> {
+        debug_assert_eq!(left.args.len(), right.args.len());
+        let ok = left.name == right.name && left.args.iter().zip(right.args.iter()).all(|(l, r)| match (self.get_val(l), self.get_val(r)) {
+            (V::Const(x), V::Const(y)) => x == y,
+            (V::Filler, V::Filler) => true,
+            (V::Var(i), x) | (x, V::Var(i)) => { self.bind(i, x); true }
+            (V::Const(_), V::Filler) | (V::Filler, V::Const(_)) => false
+        });
+        if ok { Ok(self) } else { Err(self) }
     }
-    fn bind(&mut self, var: usize, val: ValExpr) {
+    fn bind(&mut self, var: usize, val: ValArg) {
         self.vals[var] = val;
         self.binds.push(var)
     }
@@ -363,27 +485,28 @@ impl Assignments {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DB { facts: HashMap<usize, Vec<IFact>> }
 
-pub fn sexpr_to_db<'a>(sexpr: &SExpr<'a>) -> Option<(DB, Labeler<'a>)> {
+pub fn sexpr_to_db<'a>(sexpr: &SExpr<'a>) -> Option<(DB, Labeler<'a>, HashMap<&'a str, usize>)> {
+    let mut facts = vec![];
     match sexpr {
         &SExpr::Atom(_) => return None,
         &SExpr::List(ref list) => {
-            let mut db = DB::new();
-            let mut labeler = Labeler::new();
-            for sexpr in list.iter() {
-                match sexpr_to_expr(sexpr) {
+            for sexpr in list {
+                match sexpr_to_expr(sexpr).and_then(expr_to_fact) {
                     None => return None,
-                    Some(expr) => match expr_to_fact(expr) {
-                        None => return None,
-                        Some(fs) => for f in fs { db.add(f.thru(&mut labeler)) }
-                    }
+                    Some(mut fs) => facts.append(&mut fs)
                 }
             }
-            Some((db, labeler))
         }
     }
+    let mut lens = HashMap::new();
+    for f in facts.iter() { f.record_lens(&mut lens) }
+    let mut db = DB::new();
+    let mut labeler = Labeler::new();
+    for f in facts { db.add(f.thru(&mut labeler, &lens)) }
+    Some((db, labeler, lens))
 }
 
 impl DB {
@@ -397,45 +520,44 @@ impl DB {
         self.query(e).next().is_some()
     }
     pub fn add(&mut self, f: IFact) {
-        let e = match f.head {
-            IExpr::Pred(n, _) => self.facts.entry(n),
-            IExpr::Var(_) => panic!("Can't add a variable as a fact.")
-        };
-        e.or_insert(vec![]).push(f)
+        self.facts.entry(f.head.name).or_insert(vec![]).push(f)
     }
     fn query_inner<'b>(&'b self, expr: ValExpr, asg: Assignments) -> Box<Iterator<Item=Assignments> + 'b> {
-        let relevant = match expr {
-            V::Var(_) => panic!("Can't query for a variable."),
-            V::Pred(n, _) => self.facts.get(&n).expect("Can't query something that isn't in the database.")
-        };
-        Box::new(relevant.iter().flat_map(move |&IFact { ref head, ref body }| {
-            let mut asg = asg.clone();
-            let mut vars = HashMap::new();
-            let head = asg.to_val(head, &mut vars);
-            body.iter().fold(Box::new(asg.unify_val(&expr, &head).map(|asg| (asg, vars)).into_iter()) as Box<Iterator<Item=(Assignments, HashMap<usize, usize>)> + 'b>, move |asgs, t| {
-                match *t {
-                    IThing::True(ref p) => {
-                        Box::new(asgs.flat_map(move |(mut asg, mut vars)| {
-                            let p = asg.to_val(p, &mut vars);
-                            self.query_inner(p, asg).map(move |asg| (asg, vars.clone()))
-                        }))
-                    },
-                    IThing::False(ref n) => {
-                        Box::new(asgs.filter(move |&(ref asg, ref vars)| {
-                            let n = asg.to_val_immut(n, vars);
-                            self.query_inner(n, asg.clone()).next().is_none()
-                        }))
-                    },
-                    IThing::Distinct(ref l, ref r) => {
-                        Box::new(asgs.filter(move |&(ref asg, ref vars)| {
-                            let l = asg.to_val_immut(l, &vars);
-                            let r = asg.to_val_immut(r, &vars);
-                            !asg.check_val(&l, &r)
-                        }))
-                    }
-                }
-            }).map(move |(asg, _)| asg)
-        }))
+        match self.facts.get(&expr.name) {
+            Some(relevant) => {
+                Box::new(relevant.iter().flat_map(move |&IFact { ref head, ref body }| {
+                    let mut asg = asg.clone();
+                    let mut vars = HashMap::new();
+                    let head = asg.to_val(head, &mut vars);
+                    body.iter().fold(Box::new(asg.unify_val(&expr, &head).map(|asg| (asg, vars)).into_iter()) as Box<Iterator<Item=(Assignments, HashMap<usize, usize>)> + 'b>, move |asgs, t| {
+                        match *t {
+                            IThing::True(ref p) => {
+                                Box::new(asgs.flat_map(move |(mut asg, mut vars)| {
+                                    let p = asg.to_val(p, &mut vars);
+                                    self.query_inner(p, asg).map(move |asg| (asg, vars.clone()))
+                                }))
+                            },
+                            IThing::False(ref n) => {
+                                Box::new(asgs.filter(move |&(ref asg, ref vars)| {
+                                    let n = asg.to_val_immut(n, vars);
+                                    self.query_inner(n, asg.clone()).next().is_none()
+                                }))
+                            },
+                            IThing::Distinct(ref l, ref r) => {
+                                Box::new(asgs.filter(move |&(ref asg, ref vars)| {
+                                    let l = asg.to_valarg_immut(l, &vars);
+                                    let r = asg.to_valarg_immut(r, &vars);
+                                    !asg.check_val(&l, &r)
+                                }))
+                            }
+                        }
+                    }).map(move |(asg, _)| asg)
+                }))
+            },
+            None => {
+                Box::new(empty())
+            }
+        }
     }
 }
 
@@ -445,19 +567,16 @@ pub struct GGP {
     tru: usize,
     role: usize,
     legal: usize,
+    legal_len: usize,
     does: usize,
     next: usize,
+    next_len: usize,
     terminal: usize,
     goal: usize
 }
 
 impl GGP {
-    pub fn from_rules(mut db: DB, labeler: &Labeler) -> Option<GGP> {
-        let init = match labeler.check("init") {
-            Some(x) => x,
-            None => return None
-        };
-        let init_query = IExpr::Pred(init, vec![IExpr::Var(0)]);
+    pub fn from_rules(mut db: DB, labeler: &Labeler, lens: &HashMap<&str, usize>) -> Option<GGP> {
         let tru = match labeler.check("true") {
             Some(x) => x,
             None => return None
@@ -470,6 +589,7 @@ impl GGP {
             Some(x) => x,
             None => return None
         };
+        let legal_len = lens["legal"];
         let does = match labeler.check("does") {
             Some(x) => x,
             None => return None
@@ -478,6 +598,7 @@ impl GGP {
             Some(x) => x,
             None => return None
         };
+        let next_len = lens["next"];
         let terminal = match labeler.check("terminal") {
             Some(x) => x,
             None => return None
@@ -486,58 +607,52 @@ impl GGP {
             Some(x) => x,
             None => return None
         };
-        let inits = db.query(&init_query).collect::<Vec<_>>();
-        for init in inits {
-            match init {
-                IExpr::Pred(_, args) => db.add(IFact { head: IExpr::Pred(tru, args.clone()), body: vec![] }),
-                _ => unreachable!()
+        if let Some(init) = labeler.check("init") {
+            let init_query = IExpr { name: init, args: (0..).map(IArg::Var).take(lens["init"]).collect() };
+            let inits = db.query(&init_query).collect::<Vec<_>>();
+            for init in inits {
+                db.add(IFact { head: IExpr { name: tru, args: init.args.clone() }, body: vec![] })
             }
         }
-        Some(GGP { db: db, tru: tru, role: role, legal: legal, does: does, next: next, terminal: terminal, goal: goal })
+        Some(GGP { db: db, tru: tru, role: role, legal: legal, legal_len: legal_len, does: does, next: next, next_len: next_len, terminal: terminal, goal: goal })
     }
     pub fn roles(&self) -> Vec<usize> {
-        let query = IExpr::Pred(self.role, vec![IExpr::Var(0)]);
-        let ret = { self.db.query(&query).map(|x| match x {
-            IExpr::Pred(_, args) => match &args[0] {
-                &IExpr::Pred(x, _) => x,
-                _ => unreachable!()
-            },
+        let query = IExpr { name: self.role, args: vec![IArg::Var(0)] };
+        let ret = { self.db.query(&query).map(|x| match x.args[0] {
+            IArg::Const(x) => x,
             _ => unreachable!()
         }).collect() };
         ret
     }
     pub fn legal_moves_for(&self, r: usize) -> Vec<IExpr> {
-        let query = IExpr::Pred(self.legal, vec![IExpr::Pred(r, vec![]), IExpr::Var(0)]);
-        let ret = self.db.query(&query).map(|x| match x { IExpr::Pred(_, args) => args[1].clone(), _ => unreachable!() }).collect();
+        let query = IExpr { name: self.legal, args: once(IArg::Const(r)).chain((0..self.legal_len-1).map(IArg::Var)).collect() };
+        let ret = self.db.query(&query).map(|x| {
+            let args = x.args[2..].iter().cloned().collect();
+            IExpr { name: match x.args[1] { IArg::Const(n) => n, _ => panic!("Legal move has no name?") }, args: args }
+        }).collect();
         ret
     }
     pub fn play(&mut self, moves: &[(usize, IExpr)]) {
         for &(r, ref m) in moves.iter() {
-            self.db.add(IFact { head: IExpr::Pred(self.does, vec![IExpr::Pred(r, vec![]), m.clone()]), body: vec![] });
+            self.db.add(IFact { head: IExpr { name: self.does, args: once(IArg::Const(r)).chain(once(IArg::Const(m.name))).chain(m.args.iter().cloned()).collect() }, body: vec![] });
         }
-        let next_query = IExpr::Pred(self.next, vec![IExpr::Var(0)]);
+        let next_query = IExpr { name: self.next, args: (0..self.next_len).map(IArg::Var).collect() };
         let mut nexts = self.db.query(&next_query).collect::<Vec<_>>();
         nexts.sort();
         nexts.dedup(); // TODO shouldn't have to do this..
         self.db.facts.get_mut(&self.does).unwrap().clear();
         self.db.facts.get_mut(&self.tru).unwrap().clear();
         for next in nexts {
-            match next {
-                IExpr::Pred(_, args) => self.db.add(IFact { head: IExpr::Pred(self.tru, args.clone()), body: vec![] }),
-                _ => unreachable!()
-            }
+            self.db.add(IFact { head: IExpr { name: self.tru, args: next.args.clone() }, body: vec![] })
         }
     }
     pub fn is_done(&self) -> bool {
-        self.db.check(&IExpr::Pred(self.terminal, vec![]))
+        self.db.check(&IExpr { name: self.terminal, args: vec![] })
     }
     pub fn goals(&self) -> HashMap<usize, u8> {
-        let query = IExpr::Pred(self.goal, vec![IExpr::Var(0), IExpr::Var(1)]);
-        let ret = self.db.query(&query).map(|g| match g {
-            IExpr::Pred(_, args) => match (&args[0], &args[1]) {
-                (&IExpr::Pred(r, _), &IExpr::Pred(s, _)) => (r, (usize::MAX - s) as u8),
-                _ => unreachable!()
-            },
+        let query = IExpr { name: self.goal, args: vec![IArg::Var(0), IArg::Var(1)] };
+        let ret = self.db.query(&query).map(|g| match (&g.args[0], &g.args[1]) {
+            (&IArg::Const(r), &IArg::Const(s)) => (r, (usize::MAX - s) as u8),
             _ => unreachable!()
         }).collect();
         ret
@@ -549,6 +664,7 @@ mod tests {
     use super::*;
     use test::Bencher;
     use labeler::Labeler;
+    use std::collections::HashMap;
 
     fn fact<'a>(head: Expr<'a>, pos: Vec<Expr<'a>>, neg: Vec<Expr<'a>>, distinct: Vec<(Expr<'a>, Expr<'a>)>) -> Fact<'a> { Fact { head: head, body: pos.into_iter().map(|p| Thing::True(p)).chain(neg.into_iter().map(|n| Thing::False(n))).chain(distinct.into_iter().map(|(l, r)| Thing::Distinct(l, r))).collect() } }
     fn pred<'a>(name: &'a str, args: Vec<Expr<'a>>) -> Expr<'a> { Pred(name.into(), args) }
@@ -559,23 +675,31 @@ mod tests {
     fn atoms() {
         let mut db = DB::new();
         let mut labeler = Labeler::new();
+        let mut lens = HashMap::new();
         let truth = atom("truth");
-        db.add(fact(truth.clone(), vec![], vec![], vec![]).thru(&mut labeler));
-        assert!(db.check(&truth.thru(&mut labeler)));
+        let f = fact(truth.clone(), vec![], vec![], vec![]);
+        f.record_lens(&mut lens);
+        db.add(f.thru(&mut labeler, &lens));
+        assert!(db.check(&truth.thru(&mut labeler, &lens)));
     }
 
     #[test]
     fn preds() {
         let mut db = DB::new();
         let mut labeler = Labeler::new();
+        let mut lens = HashMap::new();
         let man_atom = pred("man", vec![atom("socrates")]);
-        let man_var = pred("man", vec![var("X")]).thru(&mut labeler);
-        let thing_atom = pred("thing", vec![atom("socrates")]).thru(&mut labeler);
+        let man_var_ = pred("man", vec![var("X")]);
+        man_var_.record_lens(&mut lens);
+        let man_var = man_var_.thru(&mut labeler, &lens);
+        let thing_atom_ = pred("thing", vec![atom("socrates")]);
+        thing_atom_.record_lens(&mut lens);
+        let thing_atom = thing_atom_.thru(&mut labeler, &lens);
         let thing_var = pred("thing", vec![var("X")]);
-        db.add(fact(man_atom.clone(), vec![], vec![], vec![]).thru(&mut labeler));
-        db.add(fact(thing_var.clone(), vec![], vec![], vec![]).thru(&mut labeler));
-        let man_atom = man_atom.thru(&mut labeler);
-        let thing_var = thing_var.thru(&mut labeler);
+        db.add(fact(man_atom.clone(), vec![], vec![], vec![]).thru(&mut labeler, &lens));
+        db.add(fact(thing_var.clone(), vec![], vec![], vec![]).thru(&mut labeler, &lens));
+        let man_atom = man_atom.thru(&mut labeler, &lens);
+        let thing_var = thing_var.thru(&mut labeler, &lens);
         assert_eq!(1, db.query(&man_atom).count()); // man(socrates)?
         assert_eq!(1, db.query(&man_var).count()); // man(X)?
         assert_eq!(1, db.query(&thing_atom).count()); // thing(socrates)?
@@ -584,36 +708,33 @@ mod tests {
 
     #[test]
     fn tic_tac_toe() {
-        let (mut db, mut labeler) = set_up_tic_tac_toe();
+        let (mut db, mut labeler, lens) = set_up_tic_tac_toe();
 
-        let role_query = pred("role", vec![var("X")]).thru(&mut labeler);
+        let role_query = pred("role", vec![var("X")]).thru(&mut labeler, &lens);
         assert_eq!(2, db.query(&role_query).count());
 
-        let input_query = pred("input", vec![var("R"), var("I")]).thru(&mut labeler);
+        let input_query = pred("input", vec![var("R"), var("X"), var("Y"), var("Z")]).thru(&mut labeler, &lens);
         assert_eq!(20, db.query(&input_query).count());
 
-        let base_query = pred("base", vec![var("X")]).thru(&mut labeler);
+        let base_query = pred("base", vec![var("X"), var("Y"), var("Z"), var("A")]).thru(&mut labeler, &lens);
         assert_eq!(29, db.query(&base_query).count());
 
-        let init_query = pred("init", vec![var("X")]).thru(&mut labeler);
+        let init_query = pred("init", vec![var("X"), var("Y"), var("Z"), var("A")]).thru(&mut labeler, &lens);
         let init = db.query(&init_query).collect::<Vec<_>>();
         assert_eq!(10, init.len());
 
         for expr in init.iter() {
-            if let &IExpr::Pred(_, ref args) = expr {
-                db.add(IFact { head: IExpr::Pred(labeler.put("true"), args.iter().cloned().collect()), body: vec![] });
-            } else { unreachable!() }
+            db.add(IFact { head: IExpr { name: labeler.put("true"), args: expr.args.clone() }, body: vec![] });
         }
 
-        let goal_query = pred("goal", vec![var("R"), var("X")]).thru(&mut labeler);
+        let goal_query = pred("goal", vec![var("R"), var("X")]).thru(&mut labeler, &lens);
         assert_eq!(2, db.query(&goal_query).count());
 
-        let legal_query = pred("legal", vec![var("R"), var("X")]).thru(&mut labeler);
-        let legal = db.query(&legal_query).collect::<Vec<_>>();
-        assert_eq!(10, legal.len());
+        let legal_query = pred("legal", vec![var("R"), var("X"), var("Y"), var("Z")]).thru(&mut labeler, &lens);
+        assert_eq!(10, db.query(&legal_query).count());
 
-        db.add(fact(pred("does", vec![atom("x"), pred("mark", vec![atom("1"), atom("1")])]), vec![], vec![], vec![]).thru(&mut labeler));
-        db.add(fact(pred("does", vec![atom("o"), atom("noop")]), vec![], vec![], vec![]).thru(&mut labeler));
+        db.add(fact(pred("does", vec![atom("x"), pred("mark", vec![atom("1"), atom("1")])]), vec![], vec![], vec![]).thru(&mut labeler, &lens));
+        db.add(fact(pred("does", vec![atom("o"), atom("noop")]), vec![], vec![], vec![]).thru(&mut labeler, &lens));
 
         // let next_query = pred("next", vec![var("X")]);
         // assert_eq!(10, db.query(&next_query).count()); // This would pass if results had no duplicates. (Should they?)
@@ -624,8 +745,8 @@ mod tests {
         use rand::{weak_rng, Rng};
 
         let mut rng = weak_rng();
-        let (db, labeler) = set_up_tic_tac_toe();
-        let ggp = GGP::from_rules(db, &labeler).unwrap();
+        let (db, labeler, lens) = set_up_tic_tac_toe();
+        let ggp = GGP::from_rules(db, &labeler, &lens).unwrap();
 
         assert!(!ggp.is_done());
         bench.iter(|| {
@@ -642,112 +763,117 @@ mod tests {
         });
     }
 
-    fn set_up_tic_tac_toe() -> (DB, Labeler<'static>) {
+    fn set_up_tic_tac_toe() -> (DB, Labeler<'static>, HashMap<&'static str, usize>) {
         // based on the example in http://games.stanford.edu/index.php/intro-to-gdl
         let mut db = DB::new();
         let mut labeler = Labeler::new();
+        let mut lens = HashMap::new();
+        let mut facts = vec![];
 
         let roles = ["x", "o"];
-        for r in roles.iter() { db.add(fact(pred("role", vec![atom(r)]), vec![], vec![], vec![]).thru(&mut labeler)) }
+        for r in roles.iter() { facts.push(fact(pred("role", vec![atom(r)]), vec![], vec![], vec![])) }
         
-        db.add(fact(pred("input", vec![var("R"), pred("mark", vec![var("M"), var("N")])]), vec![pred("role", vec![var("R")]), pred("index", vec![var("M")]), pred("index", vec![var("N")])], vec![], vec![]).thru(&mut labeler));
-        db.add(fact(pred("input", vec![var("R"), atom("noop")]), vec![pred("role", vec![var("R")])], vec![], vec![]).thru(&mut labeler));
+        facts.push(fact(pred("input", vec![var("R"), pred("mark", vec![var("M"), var("N")])]), vec![pred("role", vec![var("R")]), pred("index", vec![var("M")]), pred("index", vec![var("N")])], vec![], vec![]));
+        facts.push(fact(pred("input", vec![var("R"), atom("noop")]), vec![pred("role", vec![var("R")])], vec![], vec![]));
 
-        for &i in ["1", "2", "3"].iter() { db.add(fact(pred("index", vec![atom(i)]), vec![], vec![], vec![]).thru(&mut labeler)) }
+        for &i in ["1", "2", "3"].iter() { facts.push(fact(pred("index", vec![atom(i)]), vec![], vec![], vec![])) }
 
-        for m in ["x", "o", "b"].iter() { db.add(fact(pred("base", vec![pred("cell", vec![var("M"), var("N"), atom(m)])]), vec![pred("index", vec![var("M")]), pred("index", vec![var("N")])], vec![], vec![]).thru(&mut labeler)) }
-        for r in roles.iter() { db.add(fact(pred("base", vec![pred("control", vec![atom(r)])]), vec![], vec![], vec![]).thru(&mut labeler)) }
+        for m in ["x", "o", "b"].iter() { facts.push(fact(pred("base", vec![pred("cell", vec![var("M"), var("N"), atom(m)])]), vec![pred("index", vec![var("M")]), pred("index", vec![var("N")])], vec![], vec![])) }
+        for r in roles.iter() { facts.push(fact(pred("base", vec![pred("control", vec![atom(r)])]), vec![], vec![], vec![])) }
 
-        for &x in ["1", "2", "3"].iter() { for &y in ["1", "2", "3"].iter() { db.add(fact(pred("init", vec![pred("cell", vec![atom(x), atom(y), atom("b")])]), vec![], vec![], vec![]).thru(&mut labeler)) } }
-        db.add(fact(pred("init", vec![pred("control", vec![atom("x")])]), vec![], vec![], vec![]).thru(&mut labeler));
+        for &x in ["1", "2", "3"].iter() { for &y in ["1", "2", "3"].iter() { facts.push(fact(pred("init", vec![pred("cell", vec![atom(x), atom(y), atom("b")])]), vec![], vec![], vec![])) } }
+        facts.push(fact(pred("init", vec![pred("control", vec![atom("x")])]), vec![], vec![], vec![]));
 
-        db.add(fact(pred("legal", vec![var("W"), pred("mark", vec![var("X"), var("Y")])]),
+        facts.push(fact(pred("legal", vec![var("W"), pred("mark", vec![var("X"), var("Y")])]),
             vec![pred("true", vec![pred("cell", vec![var("X"), var("Y"), atom("b")])]), pred("true", vec![pred("control", vec![var("W")])])],
-            vec![], vec![]).thru(&mut labeler));
-        db.add(fact(pred("legal", vec![atom("x"), atom("noop")]), vec![pred("true", vec![pred("control", vec![atom("o")])])], vec![], vec![]).thru(&mut labeler));
-        db.add(fact(pred("legal", vec![atom("o"), atom("noop")]), vec![pred("true", vec![pred("control", vec![atom("x")])])], vec![], vec![]).thru(&mut labeler));
+            vec![], vec![]));
+        facts.push(fact(pred("legal", vec![atom("x"), atom("noop")]), vec![pred("true", vec![pred("control", vec![atom("o")])])], vec![], vec![]));
+        facts.push(fact(pred("legal", vec![atom("o"), atom("noop")]), vec![pred("true", vec![pred("control", vec![atom("x")])])], vec![], vec![]));
         
-        db.add(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), var("R")])]),
+        facts.push(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), var("R")])]),
             vec![pred("does", vec![var("R"), pred("mark", vec![var("M"), var("N")])]),
                 pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])],
-            vec![], vec![]).thru(&mut labeler));
-        db.add(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), var("W")])]),
+            vec![], vec![]));
+        facts.push(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), var("W")])]),
             vec![pred("true", vec![pred("cell", vec![var("M"), var("N"), var("W")])])],
             vec![],
-            vec![(var("W"), atom("b"))]).thru(&mut labeler));
-        db.add(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), atom("b")])]),
+            vec![(var("W"), atom("b"))]));
+        facts.push(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), atom("b")])]),
             vec![pred("does", vec![var("W"), pred("mark", vec![var("J"), var("K")])]),
                 pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])],
             vec![],
-            vec![(var("M"), var("J"))]).thru(&mut labeler));
-        db.add(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), atom("b")])]),
+            vec![(var("M"), var("J"))]));
+        facts.push(fact(pred("next", vec![pred("cell", vec![var("M"), var("N"), atom("b")])]),
             vec![pred("does", vec![var("W"), pred("mark", vec![var("J"), var("K")])]),
                 pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])],
             vec![],
-            vec![(var("N"), var("K"))]).thru(&mut labeler));
-        db.add(fact(pred("next", vec![pred("control", vec![atom("o")])]),
+            vec![(var("N"), var("K"))]));
+        facts.push(fact(pred("next", vec![pred("control", vec![atom("o")])]),
             vec![pred("true", vec![pred("control", vec![atom("x")])])],
-            vec![], vec![]).thru(&mut labeler));
-        db.add(fact(pred("next", vec![pred("control", vec![atom("x")])]),
+            vec![], vec![]));
+        facts.push(fact(pred("next", vec![pred("control", vec![atom("x")])]),
             vec![pred("true", vec![pred("control", vec![atom("o")])])],
-            vec![], vec![]).thru(&mut labeler));
+            vec![], vec![]));
 
-        db.add(fact(pred("goal", vec![atom("x"), atom("100")]),
+        facts.push(fact(pred("goal", vec![atom("x"), atom("100")]),
             vec![pred("line", vec![atom("x")])],
             vec![pred("line", vec![atom("o")])],
-            vec![]).thru(&mut labeler));
-        db.add(fact(pred("goal", vec![atom("x"), atom("50")]),
+            vec![]));
+        facts.push(fact(pred("goal", vec![atom("x"), atom("50")]),
             vec![],
             vec![pred("line", vec![atom("x")]), pred("line", vec![atom("o")])],
-            vec![]).thru(&mut labeler));
-        db.add(fact(pred("goal", vec![atom("x"), atom("0")]),
+            vec![]));
+        facts.push(fact(pred("goal", vec![atom("x"), atom("0")]),
             vec![pred("line", vec![atom("o")])],
             vec![pred("line", vec![atom("x")])],
-            vec![]).thru(&mut labeler));
-        db.add(fact(pred("goal", vec![atom("o"), atom("100")]),
+            vec![]));
+        facts.push(fact(pred("goal", vec![atom("o"), atom("100")]),
             vec![pred("line", vec![atom("o")])],
             vec![pred("line", vec![atom("x")])],
-            vec![]).thru(&mut labeler));
-        db.add(fact(pred("goal", vec![atom("o"), atom("50")]),
+            vec![]));
+        facts.push(fact(pred("goal", vec![atom("o"), atom("50")]),
             vec![],
             vec![pred("line", vec![atom("o")]), pred("line", vec![atom("x")])],
-            vec![]).thru(&mut labeler));
-        db.add(fact(pred("goal", vec![atom("o"), atom("0")]),
+            vec![]));
+        facts.push(fact(pred("goal", vec![atom("o"), atom("0")]),
             vec![pred("line", vec![atom("x")])],
             vec![pred("line", vec![atom("o")])],
-            vec![]).thru(&mut labeler));
+            vec![]));
 
-        db.add(fact(pred("line", vec![var("X")]),
+        facts.push(fact(pred("line", vec![var("X")]),
             vec![pred("row", vec![var("M"), var("X")])],
             vec![],
-            vec![]).thru(&mut labeler));
-        db.add(fact(pred("line", vec![var("X")]),
+            vec![]));
+        facts.push(fact(pred("line", vec![var("X")]),
             vec![pred("column", vec![var("M"), var("X")])],
             vec![],
-            vec![]).thru(&mut labeler));
-        db.add(fact(pred("line", vec![var("X")]),
+            vec![]));
+        facts.push(fact(pred("line", vec![var("X")]),
             vec![pred("diagonal", vec![var("X")])],
             vec![],
-            vec![]).thru(&mut labeler));
+            vec![]));
 
-        db.add(fact(pred("row", vec![var("M"), var("X")]),
+        facts.push(fact(pred("row", vec![var("M"), var("X")]),
             ["1","2","3"].iter().map(|&i| pred("true", vec![pred("cell", vec![var("M"), atom(i), var("X")])])).collect(),
-            vec![], vec![]).thru(&mut labeler));
-        db.add(fact(pred("column", vec![var("M"), var("X")]),
+            vec![], vec![]));
+        facts.push(fact(pred("column", vec![var("M"), var("X")]),
             ["1","2","3"].iter().map(|&i| pred("true", vec![pred("cell", vec![atom(i), var("M"), var("X")])])).collect(),
-            vec![], vec![]).thru(&mut labeler));
-        db.add(fact(pred("diagonal", vec![var("X")]),
+            vec![], vec![]));
+        facts.push(fact(pred("diagonal", vec![var("X")]),
             ["1","2","3"].iter().map(|&i| pred("true", vec![pred("cell", vec![atom(i), atom(i), var("X")])])).collect(),
-            vec![], vec![]).thru(&mut labeler));
-        db.add(fact(pred("diagonal", vec![var("X")]),
+            vec![], vec![]));
+        facts.push(fact(pred("diagonal", vec![var("X")]),
             ["1","2","3"].iter().zip(["3","2","1"].iter()).map(|(&i, &j)| pred("true", vec![pred("cell", vec![atom(i), atom(j), var("X")])])).collect(),
-            vec![], vec![]).thru(&mut labeler));
+            vec![], vec![]));
 
-        db.add(fact(atom("terminal"), vec![pred("line", vec![var("W")]), pred("role", vec![var("W")])], vec![], vec![]).thru(&mut labeler));
-        db.add(fact(atom("terminal"), vec![], vec![atom("open")], vec![]).thru(&mut labeler));
+        facts.push(fact(atom("terminal"), vec![pred("line", vec![var("W")]), pred("role", vec![var("W")])], vec![], vec![]));
+        facts.push(fact(atom("terminal"), vec![], vec![atom("open")], vec![]));
 
-        db.add(fact(atom("open"), vec![pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])], vec![], vec![]).thru(&mut labeler));
+        facts.push(fact(atom("open"), vec![pred("true", vec![pred("cell", vec![var("M"), var("N"), atom("b")])])], vec![], vec![]));
 
-        (db, labeler)
+        for f in facts.iter() { f.record_lens(&mut lens) }
+        for f in facts { db.add(f.thru(&mut labeler, &lens)) }
+
+        (db, labeler, lens)
     }
 }

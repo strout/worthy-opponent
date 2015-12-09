@@ -176,9 +176,9 @@ fn think(role: usize, mut ggp: GGP, recvmvs: Receiver<Vec<IExpr>>, reply: &Mutex
 
 fn run_match(desc: String, recvmvs: Receiver<String>, sendreply: Sender<String>) {
     if let Some(Message::Start(id, role, db, _, play_clock)) = parse_message(&desc) {
-        let (db, labeler) = sexpr_to_db(&db).unwrap();
+        let (db, labeler, lens) = sexpr_to_db(&db).unwrap();
         let role = labeler.check(role).unwrap();
-        let ggp = GGP::from_rules(db, &labeler).unwrap();
+        let ggp = GGP::from_rules(db, &labeler, &lens).unwrap();
         let (sendmovexprs, recvmovexprs) = channel();
         let reply = Arc::new(Mutex::new(None));
         let handle = {
@@ -189,12 +189,12 @@ fn run_match(desc: String, recvmvs: Receiver<String>, sendreply: Sender<String>)
         println!("Match {} ready.", id);
         while let Ok(mvs) = recvmvs.recv() {
             if let Some(Message::Play(_, mvs)) = parse_message(&mvs) {
-                sendmovexprs.send(mvs.iter().map(|mv| mv.try_thru(&labeler).unwrap()).collect()).unwrap();
+                sendmovexprs.send(mvs.iter().map(|mv| mv.try_thru(&labeler, &lens)).collect()).unwrap();
                 sleep_ms(play_clock * 1000 - 200);
                 let mut reply = reply.lock().unwrap();
                 match (&*reply).as_ref() {
                     None => sendreply.send("oops-i-timed-out".to_string()).unwrap(),
-                    Some(mv) => sendreply.send(mv.thru(&labeler).unwrap().to_string()).unwrap() // no move found in time :(
+                    Some(mv) => sendreply.send(mv.thru(&labeler, &lens).unwrap().to_string()).unwrap() // no move found in time :(
                 }
                 *reply = None;
             }
