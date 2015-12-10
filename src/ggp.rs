@@ -14,8 +14,7 @@ use std::cmp::max;
 
 #[derive(Clone, Debug)]
 pub struct Assignments {
-    vals: Vec<ValArg>,
-    binds: Vec<usize>
+    vals: Vec<ValArg>
 }
 
 #[derive(Clone, Debug)]
@@ -406,7 +405,7 @@ fn expr_to_fact<'a>(expr: Expr<'a>) -> Option<Vec<Fact<'a>>> {
 }
 
 impl Assignments {
-    pub fn new() -> Assignments { Assignments { vals: vec![], binds: vec![] } }
+    pub fn new() -> Assignments { Assignments { vals: vec![] } }
     fn get_val(&self, base: &V) -> V {
         match base {
             &V::Var(mut i) => {
@@ -470,18 +469,16 @@ impl Assignments {
         });
         if ok { Ok(self) } else { Err(self) }
     }
-    fn bind(&mut self, var: usize, val: ValArg) {
-        self.vals[var] = val;
-        self.binds.push(var)
-    }
-    fn unwind(&mut self, depth: usize) {
-        while depth < self.binds.len() {
-            let i = self.binds.pop().unwrap();
-            if let Some(v) = self.vals.get_mut(i)
-            {
-                *v = V::Var(i)
+    fn bind(&mut self, mut var: usize, mut val: ValArg) {
+        if let V::Var(x) = val {
+            if x == var {
+                return
+            } else if x > var {
+                val = V::Var(var);
+                var = x;
             }
         }
+        self.vals[var] = val;
     }
 }
 
@@ -525,6 +522,7 @@ impl DB {
     fn query_inner<'b>(&'b self, expr: ValExpr, asg: Assignments) -> Box<Iterator<Item=Assignments> + 'b> {
         match self.facts.get(&expr.name) {
             Some(relevant) => {
+                let depth = asg.vals.len();
                 Box::new(relevant.iter().flat_map(move |&IFact { ref head, ref body }| {
                     let mut asg = asg.clone();
                     let mut vars = HashMap::new();
@@ -552,7 +550,7 @@ impl DB {
                             }
                         }
                     }).map(move |(asg, _)| asg)
-                }))
+                }.map(move |mut asg| { asg.vals.truncate(depth); asg })))
             },
             None => {
                 Box::new(empty())
