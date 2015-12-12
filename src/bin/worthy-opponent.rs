@@ -1,16 +1,14 @@
 extern crate tiny_http;
 extern crate rand;
 extern crate worthy_opponent;
-extern crate thread_scoped;
 
-use tiny_http::{ServerBuilder, Response, Header};
+use tiny_http::{ServerBuilder, Request, Response};
 use rand::{Rng, weak_rng};
 use std::collections::HashMap;
 use worthy_opponent::ggp::{IExpr, Expr, GGP, SExpr, sexpr_to_db, sexpr_to_expr, parse_sexpr};
 use std::hash::Hash;
 use std::fmt::Display;
-use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
-use thread_scoped::scoped;
+use std::sync::mpsc::{channel, Receiver, TryRecvError};
 use std::thread::{spawn, sleep_ms};
 use std::sync::{Mutex, Arc};
 
@@ -174,34 +172,35 @@ fn think(role: usize, mut ggp: GGP, recvmvs: Receiver<Vec<IExpr>>, reply: &Mutex
     }
 }
 
-fn run_match(desc: String, recvmvs: Receiver<String>, sendreply: Sender<String>) {
-    if let Some(Message::Start(id, role, db, _, play_clock)) = parse_message(&desc) {
+fn run_match(recvreqs: Receiver<(String, Request)>) {
+    let (desc, req) = recvreqs.recv().unwrap();
+    if let Some(Message::Start(id, role, db, start_clock, play_clock)) = parse_message(&desc) {
         let (db, labeler, lens) = sexpr_to_db(&db).unwrap();
         let role = labeler.check(role).unwrap();
         let ggp = GGP::from_rules(db, &labeler, &lens).unwrap();
         let (sendmovexprs, recvmovexprs) = channel();
         let reply = Arc::new(Mutex::new(None));
-        let handle = {
+        {
             let reply = reply.clone();
-            unsafe { scoped(move || think(role, ggp, recvmovexprs, &*reply)) }
+            spawn(move || think(role, ggp, recvmovexprs, &*reply))
         };
-        let sendmovexprs = sendmovexprs; // Move sendmovexprs so it's dropped before handle if we panic.
-        println!("Match {} ready.", id);
-        while let Ok(mvs) = recvmvs.recv() {
-            if let Some(Message::Play(_, mvs)) = parse_message(&mvs) {
+        println!("Match {} preparing.", id);
+        sleep_ms(1000 * start_clock - 200);
+        req.respond(Response::from_data("ready"));
+        println!("Match {} started.", id);
+        while let Ok((desc, req)) = recvreqs.recv() {
+            if let Some(Message::Play(_, mvs)) = parse_message(&desc) {
                 sendmovexprs.send(mvs.iter().map(|mv| mv.try_thru(&labeler, &lens)).collect()).unwrap();
                 sleep_ms(play_clock * 1000 - 200);
                 let mut reply = reply.lock().unwrap();
-                match (&*reply).as_ref() {
-                    None => sendreply.send("oops-i-timed-out".to_string()).unwrap(),
-                    Some(mv) => sendreply.send(mv.thru(&labeler, &lens).unwrap().to_string()).unwrap() // no move found in time :(
-                }
+                req.respond(Response::from_data(match (&*reply).as_ref() {
+                    None => "oops-i-timed-out".into(),
+                    Some(mv) => mv.thru(&labeler, &lens).unwrap().to_string()
+                }));
                 *reply = None;
             }
         }
         println!("Match {} shutting down.", id);
-        drop(sendmovexprs);
-        handle.join();
     }
 }
 
@@ -216,26 +215,16 @@ fn main() {
         let body = body.to_lowercase();
         println!("Got: [[\n{}\n]]", body);
         match parse_message(&body) {
-            Some(Message::Info) => req.respond(Response::from_data("available").with_header(Header::from_bytes("Content-Type", "text/acl").unwrap())),
+            Some(Message::Info) => req.respond(Response::from_data("available")),
             Some(Message::Preview(_, _)) => {},
-            Some(Message::Start(id, _, _, start_clock, _)) => {
-                let (sendmvs, recvmvs) = channel();
-                let (sendreply, recvreply) = channel();
-                ongoing.insert(id.to_string(), (sendmvs, recvreply));
-                let desc = body.clone();
-                spawn(move || run_match(desc, recvmvs, sendreply));
-                sleep_ms(1000 * start_clock - 200);
-                req.respond(Response::from_data("ready").with_header(Header::from_bytes("Content-Type", "text/acl").unwrap()))
+            Some(Message::Start(id, _, _, _, _)) => {
+                let (sendreqs, recvreqs) = channel();
+                sendreqs.send((body.clone(), req)).unwrap();
+                ongoing.insert(id.to_string(), sendreqs);
+                spawn(move || run_match(recvreqs));
             },
-            Some(Message::Play(id, _)) => if let Some(&mut (ref mut sendmvs, ref mut recvreply)) = ongoing.get_mut(id) {
-                sendmvs.send(body.clone()).unwrap();
-                match recvreply.recv() {
-                    Ok(mv) => req.respond(Response::from_data(mv).with_header(Header::from_bytes("Content-Type", "text/acl").unwrap())),
-                    Err(err) => {
-                        println!("Error in match {}: {}", id, err);
-                        req.respond(Response::from_data("oops-i-crashed").with_header(Header::from_bytes("Content-Type", "text/acl").unwrap()))
-                    }
-                }
+            Some(Message::Play(id, _)) => if let Some(sendreqs) = ongoing.get_mut(id) {
+                sendreqs.send((body.clone(), req)).unwrap();
             } else { println!("Asked to play in unknown match {}", id) },
             Some(Message::Stop(id, _)) | Some(Message::Abort(id)) => { ongoing.remove(id); },
             None => { println!("Bad request: {}", body); req.respond(Response::from_string("dunno-lol").with_status_code(400)) }

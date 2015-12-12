@@ -14,7 +14,6 @@ debug = true
 rand = "*"
 bit-set = "*"
 tiny_http = "*"
-thread-scoped = "*"
 
 [dev-dependencies]
 quickcheck = "*"
