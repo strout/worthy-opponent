@@ -459,7 +459,7 @@ impl Assignments {
             (V::Const(_), V::Filler) | (V::Filler, V::Const(_)) => false
         }
     }
-    fn unify_val(mut self, left: &ValExpr, right: &ValExpr) -> Result<Assignments, Assignments> {
+    fn unify_val(mut self, left: &ValExpr, right: &ValExpr) -> Option<Assignments> {
         debug_assert_eq!(left.args.len(), right.args.len());
         let ok = left.name == right.name && left.args.iter().zip(right.args.iter()).all(|(l, r)| match (self.get_val(l), self.get_val(r)) {
             (V::Const(x), V::Const(y)) => x == y,
@@ -467,7 +467,7 @@ impl Assignments {
             (V::Var(i), x) | (x, V::Var(i)) => { self.bind(i, x); true }
             (V::Const(_), V::Filler) | (V::Filler, V::Const(_)) => false
         });
-        if ok { Ok(self) } else { Err(self) }
+        if ok { Some(self) } else { None }
     }
     fn bind(&mut self, mut var: usize, mut val: ValArg) {
         if let V::Var(x) = val {
