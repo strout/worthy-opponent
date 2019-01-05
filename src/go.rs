@@ -212,28 +212,30 @@ impl Game for Go {
 mod tests {
     use game::Game;
     use super::*;
-    use test::Bencher;
-    use rand::{weak_rng, Rng};
+    use bencher::Bencher;
+    use rand::{FromEntropy, rngs::SmallRng};
 
+/*
     #[bench]
     fn play_legal_move(bench: &mut Bencher) {
-        let mut rng = weak_rng();
+        let mut rng = SmallRng::from_entropy();
         let mut go = Go::init();
         bench.iter(|| {
             let mvs = go.legal_moves();
-            let mv = rng.choose(&mvs[..]).unwrap().item;
+            let mv = rng.choose(&mvs[..]).unwrap().0;
             go.play(&mv);
         });
     }
 
     #[bench]
     fn play_playout_move(bench: &mut Bencher) {
-        let mut rng = weak_rng();
+        let mut rng = SmallRng::from_entropy();
         let mut go = Go::init();
         bench.iter(|| {
             let mvs = go.playout_moves();
-            let mv = rng.choose(&mvs[..]).unwrap().item;
+            let mv = rng.choose(&mvs[..]).unwrap().0;
             go.play(&mv);
         });
     }
+*/
 }

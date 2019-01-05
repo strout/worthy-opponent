@@ -1,10 +1,8 @@
-#![cfg_attr(test, feature(test))]
-
 extern crate rand;
 extern crate bit_set;
 
 #[cfg(test)]
-extern crate test;
+extern crate bencher;
 #[cfg(test)]
 extern crate quickcheck;
 

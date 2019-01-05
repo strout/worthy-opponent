@@ -660,7 +660,7 @@ impl GGP {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test::Bencher;
+    use bencher::Bencher;
     use labeler::Labeler;
     use std::collections::HashMap;
 
@@ -738,11 +738,12 @@ mod tests {
         // assert_eq!(10, db.query(&next_query).count()); // This would pass if results had no duplicates. (Should they?)
     }
 
+	/*
     #[bench]
     fn tic_tac_toe_playthrough(bench: &mut Bencher) {
-        use rand::{weak_rng, Rng};
+        use rand::{prelude::SliceRandom, FromEntropy, rngs::SmallRng};
 
-        let mut rng = weak_rng();
+        let mut rng = SmallRng::from_entropy();
         let (db, labeler, lens) = set_up_tic_tac_toe();
         let ggp = GGP::from_rules(db, &labeler, &lens).unwrap();
 
@@ -754,12 +755,13 @@ mod tests {
                 let moves = roles.iter().map(|&r| {
                     let all = ggp.legal_moves_for(r);
                     assert!(!all.is_empty());
-                    (r, rng.choose(&all[..]).unwrap().clone())
+                    (r, all.choose(&mut rng).unwrap().clone())
                 }).collect::<Vec<_>>();
                 ggp.play(&moves[..]);
             }
         });
     }
+    */
 
     fn set_up_tic_tac_toe() -> (DB, Labeler<'static>, HashMap<&'static str, usize>) {
         // based on the example in http://games.stanford.edu/index.php/intro-to-gdl
