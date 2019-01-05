@@ -1,7 +1,6 @@
 // A general game player
 
-use std::iter::*;
-use std::collections::HashMap;
+use std::iter::*; use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::fmt::{Display, Formatter, Error};
 use std::result::Result;
@@ -606,7 +605,7 @@ impl GGP {
             None => return None
         };
         if let Some(init) = labeler.check("init") {
-            let init_query = IExpr { name: init, args: (0..).map(IArg::Var).take(lens["init"]).collect() };
+            let init_query = IExpr { name: init, args: (0..lens["init"]).map(IArg::Var).collect() };
             let inits = db.query(&init_query).collect::<Vec<_>>();
             for init in inits {
                 db.add(IFact { head: IExpr { name: tru, args: init.args.clone() }, body: vec![] })
@@ -655,12 +654,16 @@ impl GGP {
         }).collect();
         ret
     }
+    pub fn state(&self) -> Vec<IExpr> {
+        let query = IExpr { name: self.legal, args: (0..self.legal_len).map(IArg::Var).collect() }; // next len == true len
+        let ret = self.db.query(&query).collect();
+        ret
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bencher::Bencher;
     use labeler::Labeler;
     use std::collections::HashMap;
 
@@ -729,6 +732,7 @@ mod tests {
         assert_eq!(2, db.query(&goal_query).count());
 
         let legal_query = pred("legal", vec![var("R"), var("X"), var("Y"), var("Z")]).thru(&mut labeler, &lens);
+        println!("{:?}", db.query(&legal_query).map(|x| x.thru(&labeler, &lens).unwrap()).collect::<Vec<_>>());
         assert_eq!(10, db.query(&legal_query).count());
 
         db.add(fact(pred("does", vec![atom("x"), pred("mark", vec![atom("1"), atom("1")])]), vec![], vec![], vec![]).thru(&mut labeler, &lens));
@@ -737,31 +741,6 @@ mod tests {
         // let next_query = pred("next", vec![var("X")]);
         // assert_eq!(10, db.query(&next_query).count()); // This would pass if results had no duplicates. (Should they?)
     }
-
-	/*
-    #[bench]
-    fn tic_tac_toe_playthrough(bench: &mut Bencher) {
-        use rand::{seq::SliceRandom, FromEntropy, rngs::SmallRng};
-
-        let mut rng = SmallRng::from_entropy();
-        let (db, labeler, lens) = set_up_tic_tac_toe();
-        let ggp = GGP::from_rules(db, &labeler, &lens).unwrap();
-
-        assert!(!ggp.is_done());
-        bench.iter(|| {
-            let mut ggp = ggp.clone();
-            let roles = ggp.roles();
-            while !ggp.is_done() {
-                let moves = roles.iter().map(|&r| {
-                    let all = ggp.legal_moves_for(r);
-                    assert!(!all.is_empty());
-                    (r, all.choose(&mut rng).unwrap().clone())
-                }).collect::<Vec<_>>();
-                ggp.play(&moves[..]);
-            }
-        });
-    }
-    */
 
     fn set_up_tic_tac_toe() -> (DB, Labeler<'static>, HashMap<&'static str, usize>) {
         // based on the example in http://games.stanford.edu/index.php/intro-to-gdl
@@ -772,7 +751,7 @@ mod tests {
 
         let roles = ["x", "o"];
         for r in roles.iter() { facts.push(fact(pred("role", vec![atom(r)]), vec![], vec![], vec![])) }
-        
+
         facts.push(fact(pred("input", vec![var("R"), pred("mark", vec![var("M"), var("N")])]), vec![pred("role", vec![var("R")]), pred("index", vec![var("M")]), pred("index", vec![var("N")])], vec![], vec![]));
         facts.push(fact(pred("input", vec![var("R"), atom("noop")]), vec![pred("role", vec![var("R")])], vec![], vec![]));
 

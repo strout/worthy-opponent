@@ -253,6 +253,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    /*
     use super::*;
     use worthy_opponent::game::Game;
     use bencher::Bencher;
@@ -269,7 +270,6 @@ mod tests {
         bench.iter(|| { let mut g2 = g.clone(); mc_iteration(&mut rng, &mut g2, &mut mc); })
     }
 
-/*
     #[bench]
     fn go(bench: &mut Bencher) {
         bench_mc_iteration::<Go>(bench)
