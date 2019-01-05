@@ -8,8 +8,8 @@ extern crate test;
 
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
-use rand::{Rng, FromEntropy, rngs::SmallRng};
-use rand::distributions::{Weighted, WeightedChoice};
+use rand::{Rng, FromEntropy, rngs::SmallRng, prelude::SliceRandom};
+use rand::distributions::{Weighted, WeightedIndex};
 use std::io::{BufReader, BufRead, Write};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -96,9 +96,8 @@ fn mc_move<'a, M, T: Rng>(rng: &mut T, mc: &'a mut MCTree<M>, explore: f64) -> (
 }
 
 fn random_move<R: Rng, G: Game>(rng: &mut R, g: &G) -> G::Move {
-    let mut moves = g.playout_moves();
-    let dist = WeightedChoice::new(&mut moves[..]);
-    rng.sample(dist)
+    let moves = g.playout_moves();
+    moves.choose_weighted(rng, |m| m.weight).unwrap().item.clone() // TODO can we move it out instead of cloning?
 }
 
 fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
