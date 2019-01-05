@@ -1,6 +1,5 @@
 use game::Game;
 use basics::*;
-use rand::distributions::Weighted;
 use std::iter::repeat;
 use std::mem::uninitialized;
 
@@ -123,8 +122,8 @@ impl Game for ConnectFour {
            x => Some(if x == self.current_player() { 1.0 } else { 0.0 }),
        }
     }
-    fn legal_moves(&self) -> Vec<Weighted<usize>> {
-       (0..WIDTH).filter_map(|c| self.lowest_free(c).map(|m| Weighted { weight: self.weight_for(m), item: m })).collect()
+    fn legal_moves(&self) -> Vec<(usize, u32)> {
+       (0..WIDTH).filter_map(|c| self.lowest_free(c).map(|m| (m, self.weight_for(m)))).collect()
     }
     fn play(&mut self, &act: &usize) {
        self.board[act] = self.current_player();

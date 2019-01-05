@@ -1,7 +1,6 @@
 use game::Game;
 use basics::*;
 use bit_set::BitSet;
-use rand::distributions::Weighted;
 use std::str::FromStr;
 use std::fmt::{self, Display, Formatter};
 
@@ -180,8 +179,11 @@ impl Game for NineMensMorris {
             else { None }
         }
     }
-    fn legal_moves(&self) -> Vec<Weighted<Move>> {
-        self.moves(self.current_player()).into_iter().map(|m| Weighted { weight: self.weigh_move(&m), item: m }).collect()
+    fn legal_moves(&self) -> Vec<(Move, u32)> {
+        self.moves(self.current_player()).into_iter().map(|m| {
+            let w = self.weigh_move(&m);
+            (m, w)
+        }).collect()
     }
     fn play(&mut self, &Move { from, to, remove }: &Move) {
         let mut removed = 0;

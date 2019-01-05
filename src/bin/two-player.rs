@@ -8,8 +8,8 @@ extern crate test;
 
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
+use std::time::Duration;
 use rand::{Rng, FromEntropy, rngs::SmallRng, prelude::SliceRandom};
-use rand::distributions::{Weighted, WeightedIndex};
 use std::io::{BufReader, BufRead, Write};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -61,7 +61,7 @@ fn mc_expand<G: Game>(mc: &mut MCTree<G::Move>, g: &G) {
         mc.replies = Some({
             let mut reps = Vec::new();
             let mvs = g.legal_moves();
-            for Weighted { item, weight } in mvs {
+            for (item, weight) in mvs {
                 reps.push((item, MCTree::new(weight)));
             }
             reps
@@ -97,7 +97,7 @@ fn mc_move<'a, M, T: Rng>(rng: &mut T, mc: &'a mut MCTree<M>, explore: f64) -> (
 
 fn random_move<R: Rng, G: Game>(rng: &mut R, g: &G) -> G::Move {
     let moves = g.playout_moves();
-    moves.choose_weighted(rng, |m| m.weight).unwrap().item.clone() // TODO can we move it out instead of cloning?
+    moves.choose_weighted(rng, |m| m.1).unwrap().0.clone() // TODO can we move it out instead of cloning?
 }
 
 fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
@@ -168,7 +168,7 @@ fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>) {
     }
 }
 
-fn run<'a, G: Game, R: BufRead, W: Write>(think_ms: u32, input: &mut R, output: &mut W) where G::Move: 'static {
+fn run<'a, G: Game, R: BufRead, W: Write>(think_ms: u64, input: &mut R, output: &mut W) where G::Move: 'static {
     let (sendcmd, recvcmd) = channel();
     let (sendmv, recvmv) = channel();
     thread::spawn(move || think::<G>(recvcmd, sendmv));
@@ -186,7 +186,7 @@ fn run<'a, G: Game, R: BufRead, W: Write>(think_ms: u32, input: &mut R, output: 
             x => panic!("Protocol error! I don't know the command '{}'.", x)
         };
         let is_gen = if let Cmd::Gen = cmd { true } else { false };
-        if is_gen { thread::sleep_ms(think_ms) }
+        if is_gen { thread::sleep(Duration::from_millis(think_ms)) }
         sendcmd.send(cmd).unwrap();
         if is_gen {
             let mv = recvmv.recv().unwrap();

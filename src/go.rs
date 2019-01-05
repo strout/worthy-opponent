@@ -3,7 +3,6 @@ const SIZE : usize = 9;
 use bit_set::BitSet;
 use game::Game;
 use basics::*;
-use rand::distributions::Weighted;
 
 type Pos = usize;
 
@@ -180,16 +179,16 @@ impl Game for Go {
             else { Some(1.0) }
         } else { None }
     }
-    fn legal_moves(&self) -> Vec<Weighted<usize>> {
+    fn legal_moves(&self) -> Vec<(usize, u32)> {
         let max = SIZE * SIZE;
-        let mut moves = (0..max).filter_map(|i| if self.legal(i) { Some(Weighted { weight: self.weigh_move(i, false), item: i }) } else { None }).collect::<Vec<_>>();
-        moves.push(Weighted { weight: 1, item: max });
+        let mut moves = (0..max).filter_map(|i| if self.legal(i) { Some((i, self.weigh_move(i, false))) } else { None }).collect::<Vec<_>>();
+        moves.push((max, 1));
         moves
     }
-    fn playout_moves(&self) -> Vec<Weighted<usize>> {
+    fn playout_moves(&self) -> Vec<(usize, u32)> {
         let max = SIZE * SIZE;
-        let mut moves = self.board.iter().enumerate().filter_map(|(i, x)| if x.is_empty() { Some(Weighted { weight: self.weigh_move(i, true), item: i }) } else { None }).collect::<Vec<_>>();
-        moves.push(Weighted { weight: 1, item: max });
+        let mut moves = self.board.iter().enumerate().filter_map(|(i, x)| if x.is_empty() { Some((i, self.weigh_move(i, true))) } else { None }).collect::<Vec<_>>();
+        moves.push((max, 1));
         moves
     }
     fn play(&mut self, &act: &usize) {

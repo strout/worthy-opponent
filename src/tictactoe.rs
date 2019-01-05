@@ -1,6 +1,5 @@
 use game::Game;
 use basics::*;
-use rand::distributions::Weighted;
 
 #[derive(Clone, Debug)]
 pub struct TicTacToe {
@@ -51,8 +50,8 @@ impl Game for TicTacToe {
            x => Some(if x == self.current { 1.0 } else { 0.0 }),
        }
     }
-    fn legal_moves(&self) -> Vec<Weighted<usize>> {
-       self.board.iter().enumerate().filter_map(|(i, x)| if x.is_empty() { Some(Weighted { weight: self.weight_for(i), item: i }) } else { None }).collect::<Vec<_>>()
+    fn legal_moves(&self) -> Vec<(usize, u32)> {
+       self.board.iter().enumerate().filter_map(|(i, x)| if x.is_empty() { Some((i, self.weight_for(i))) } else { None }).collect::<Vec<_>>()
     }
     fn play(&mut self, &act: &usize) {
        self.board[act] = self.current;
