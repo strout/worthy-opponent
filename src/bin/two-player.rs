@@ -122,7 +122,7 @@ pub fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree<G::
             play_out(rng, g)
         } else {
             mc_expand(mc, g);
-            let (mv, rep) = mc_move(rng, mc, 2.0);
+            let (mv, rep) = mc_move(rng, mc, 2.0_f64.sqrt());
             g.play(mv);
             mc_iteration(rng, g, rep)
         }

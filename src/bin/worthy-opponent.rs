@@ -75,7 +75,7 @@ fn tree_search<T: Rng>(rng: &mut T, ggp: &mut GGP, mcs: &mut [(usize, &mut MCTre
         ggp.goals().into_iter().map(|(k, v)| (k, v as f64)).collect()
     } else {
         let mut result = if mcs.iter().any(|&(_, ref mc)| mc.plays > 0) {
-            let mut next = mcs.iter_mut().map(|&mut (r, ref mut mc)| (r, choose_move(rng, ggp, r, mc, 100.0))).collect::<Vec<_>>();
+            let mut next = mcs.iter_mut().map(|&mut (r, ref mut mc)| (r, choose_move(rng, ggp, r, mc, 2.0_f64.sqrt()))).collect::<Vec<_>>();
             let mvs = next.iter().map(|&(r, (ref mv, _))| (r, mv.clone())).collect::<Vec<_>>();
             ggp.play(&mvs[..]);
             let mvs2 = mvs.iter().map(|x| x.1.clone()).collect::<Vec<_>>();
