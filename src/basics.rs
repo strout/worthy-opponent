@@ -1,4 +1,5 @@
-use rand::{Rand, Rng};
+use rand::Rng;
+use rand::distributions::{Distribution, Standard};
 use std::mem;
 pub use self::Space::*;
 
@@ -100,8 +101,8 @@ impl Space {
     }
 }
 
-impl Rand for Space {
-    fn rand<R: Rng>(rng: &mut R) -> Space {
+impl Distribution<Space> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Space {
         match rng.gen_range(0, 3) {
             0 => Empty,
             1 => Black,

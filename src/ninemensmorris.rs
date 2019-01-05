@@ -121,7 +121,7 @@ impl NineMensMorris {
     }
     fn adjacent_free(&self, x: usize) -> BitSet {
         let mut ret = ADJACENT_SPACES[x].iter().cloned().collect::<BitSet>();
-        for (i, x) in self.board.iter().enumerate() { if x.is_filled() { ret.remove(&i); } };
+        for (i, x) in self.board.iter().enumerate() { if x.is_filled() { ret.remove(i); } };
         ret
     }
     fn moves(&self, c: Space) -> Vec<Move> {

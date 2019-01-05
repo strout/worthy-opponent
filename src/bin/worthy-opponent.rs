@@ -2,8 +2,8 @@ extern crate tiny_http;
 extern crate rand;
 extern crate worthy_opponent;
 
-use tiny_http::{ServerBuilder, Request, Response};
-use rand::{Rng, weak_rng};
+use tiny_http::{Server, Request, Response};
+use rand::{Rng, FromEntropy, rngs::SmallRng};
 use std::collections::HashMap;
 use worthy_opponent::ggp::{IExpr, Expr, GGP, SExpr, sexpr_to_db, sexpr_to_expr, parse_sexpr};
 use std::hash::Hash;
@@ -61,7 +61,7 @@ fn choose_move<'a, T: Rng>(rng: &mut T, ggp: &GGP, role: usize, mc: &'a mut MCTr
             count = 1;
         } else if score == best_score {
             count += 1;
-            if rng.gen_weighted_bool(count) { best = Some(mv.clone()) }
+            if rng.gen_bool(1.0 / count as f64) { best = Some(mv.clone()) }
         }
     }
     let mv = best.unwrap();
@@ -147,7 +147,7 @@ fn parse_message(s: &str) -> Option<Message> {
 fn think(role: usize, mut ggp: GGP, recvmvs: Receiver<Vec<IExpr>>, reply: &Mutex<Option<IExpr>>) {
     let roles = ggp.roles();
     let mut mcs = roles.iter().map(|&r| (r, MCTree::new())).collect::<Vec<_>>();
-    let mut rng = weak_rng();
+    let mut rng = SmallRng::from_entropy();
     loop {
         match recvmvs.try_recv() {
             Err(TryRecvError::Empty) => {},
@@ -186,7 +186,7 @@ fn run_match(recvreqs: Receiver<(String, Request)>) {
         };
         println!("Match {} preparing.", id);
         sleep_ms(1000 * start_clock - 200);
-        req.respond(Response::from_data("ready"));
+        req.respond(Response::from_data("ready")).unwrap();
         println!("Match {} started.", id);
         while let Ok((desc, req)) = recvreqs.recv() {
             if let Some(Message::Play(_, mvs)) = parse_message(&desc) {
@@ -196,7 +196,7 @@ fn run_match(recvreqs: Receiver<(String, Request)>) {
                 req.respond(Response::from_data(match (&*reply).as_ref() {
                     None => "oops-i-timed-out".into(),
                     Some(mv) => mv.thru(&labeler, &lens).unwrap().to_string()
-                }));
+                })).unwrap();
                 *reply = None;
             }
         }
@@ -205,7 +205,7 @@ fn run_match(recvreqs: Receiver<(String, Request)>) {
 }
 
 fn main() {
-    let srv = ServerBuilder::new().with_port(if cfg!(debug_assertions) { 64335 } else { 9147 }).build().unwrap();
+    let srv = Server::http(if cfg!(debug_assertions) { "0.0.0.0:64335" } else { "0.0.0.0:9147" }).unwrap();
     let mut ongoing = HashMap::new();
     let mut body = String::new();
     for mut req in srv.incoming_requests() {
@@ -215,7 +215,7 @@ fn main() {
         let body = body.to_lowercase();
         println!("Got: [[\n{}\n]]", body);
         match parse_message(&body) {
-            Some(Message::Info) => req.respond(Response::from_data("available")),
+            Some(Message::Info) => req.respond(Response::from_data("available")).unwrap(),
             Some(Message::Preview(_, _)) => {},
             Some(Message::Start(id, _, _, _, _)) => {
                 let (sendreqs, recvreqs) = channel();
@@ -227,7 +227,7 @@ fn main() {
                 sendreqs.send((body.clone(), req)).unwrap();
             } else { println!("Asked to play in unknown match {}", id) },
             Some(Message::Stop(id, _)) | Some(Message::Abort(id)) => { ongoing.remove(id); },
-            None => { println!("Bad request: {}", body); req.respond(Response::from_string("dunno-lol").with_status_code(400)) }
+            None => { println!("Bad request: {}", body); req.respond(Response::from_string("dunno-lol").with_status_code(400)).unwrap() }
         }
     }
 }

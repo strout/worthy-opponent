@@ -23,7 +23,7 @@ fn owner_inner(c: Space, p: Pos, b: &[Space], visited: &mut BitSet, white: bool,
         (c1, _) => (c1 == Black, c1 == White) // TODO this comparison will run WAY too many times!
     };
     if c == c2 {
-        if visited.contains(&p) { return (black, white, 0) }
+        if visited.contains(p) { return (black, white, 0) }
         visited.insert(p);
         let mut sum = 0;
         for &p in neighbors(p).into_iter().flat_map(|x| x) {
@@ -41,7 +41,7 @@ fn score(board: &[Space]) -> (usize, usize) {
     let mut w = 0;
     let mut visited = BitSet::with_capacity(SIZE * SIZE);
     for p in 0..SIZE * SIZE {
-        if !visited.contains(&p) {
+        if !visited.contains(p) {
             match owner_inner(board[p], p, board, &mut visited, false, false) {
                 (true, false, n) => b += n,
                     (false, true, n) => w += n,
@@ -53,7 +53,7 @@ fn score(board: &[Space]) -> (usize, usize) {
 }
 
 fn capture_inner(c: Space, p: Pos, b: &[Space], captured: &mut BitSet) -> bool {
-    if !captured.contains(&p) {
+    if !captured.contains(p) {
         match b[p] {
             Empty => return false,
             c2 => if c == c2 {

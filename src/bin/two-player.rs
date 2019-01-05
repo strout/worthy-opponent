@@ -8,8 +8,8 @@ extern crate test;
 
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
-use rand::Rng;
-use rand::distributions::{Weighted, WeightedChoice, IndependentSample};
+use rand::{Rng, FromEntropy, rngs::SmallRng};
+use rand::distributions::{Weighted, WeightedChoice};
 use std::io::{BufReader, BufRead, Write};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -86,7 +86,7 @@ fn mc_move<'a, M, T: Rng>(rng: &mut T, mc: &'a mut MCTree<M>, explore: f64) -> (
             count = 1;
         } else if score == best_score {
             count += 1;
-            if rng.gen_weighted_bool(count) {
+            if rng.gen_bool(1.0 / count as f64) {
                 best = Some(p);
             }
         }
@@ -98,7 +98,7 @@ fn mc_move<'a, M, T: Rng>(rng: &mut T, mc: &'a mut MCTree<M>, explore: f64) -> (
 fn random_move<R: Rng, G: Game>(rng: &mut R, g: &G) -> G::Move {
     let mut moves = g.playout_moves();
     let dist = WeightedChoice::new(&mut moves[..]);
-    dist.ind_sample(rng)
+    rng.sample(dist)
 }
 
 fn play_out<T: Rng, G: Game>(rng: &mut T, g: &mut G) -> f64 {
@@ -139,7 +139,7 @@ pub fn mc_iteration<T: Rng, G: Game>(rng: &mut T, g: &mut G, mc: &mut MCTree<G::
 enum Cmd<M> { Move(M), Gen, Reset }
 
 fn think<G: Game>(cmds: Receiver<Cmd<G::Move>>, mvs: Sender<G::Move>) {
-    let mut rng = rand::weak_rng();
+    let mut rng = SmallRng::from_entropy();
     let mut g = G::init();
     let mut mc = MCTree::new(0);
     loop {
