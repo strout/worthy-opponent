@@ -3,7 +3,7 @@ extern crate rand;
 extern crate worthy_opponent;
 
 use tiny_http::{Server, Request, Response};
-use rand::{Rng, FromEntropy, rngs::SmallRng, prelude::SliceRandom};
+use rand::{Rng, FromEntropy, rngs::SmallRng, seq::SliceRandom};
 use std::collections::HashMap;
 use worthy_opponent::ggp::{IExpr, Expr, GGP, SExpr, sexpr_to_db, sexpr_to_expr, parse_sexpr};
 use std::hash::Hash;

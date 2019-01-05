@@ -741,7 +741,7 @@ mod tests {
 	/*
     #[bench]
     fn tic_tac_toe_playthrough(bench: &mut Bencher) {
-        use rand::{prelude::SliceRandom, FromEntropy, rngs::SmallRng};
+        use rand::{seq::SliceRandom, FromEntropy, rngs::SmallRng};
 
         let mut rng = SmallRng::from_entropy();
         let (db, labeler, lens) = set_up_tic_tac_toe();

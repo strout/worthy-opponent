@@ -10,6 +10,10 @@ lto = true
 [profile.bench]
 debug = true
 
+[[bench]]
+name = "benchmarks"
+harness = false
+
 [dependencies]
 rand = "*"
 bit-set = "*"
@@ -17,4 +21,5 @@ tiny_http = "*"
 
 [dev-dependencies]
 quickcheck = "*"
-bencher = "*"
+bencher = "*" # TODO remove
+criterion = "*"

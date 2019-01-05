@@ -7,7 +7,7 @@ extern crate bencher;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
-use rand::{Rng, FromEntropy, rngs::SmallRng, prelude::SliceRandom};
+use rand::{Rng, FromEntropy, rngs::SmallRng, seq::SliceRandom};
 use std::io::{BufReader, BufRead, Write};
 use std::collections::HashMap;
 use std::fmt::Display;

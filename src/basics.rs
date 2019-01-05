@@ -131,8 +131,6 @@ impl Arbitrary for Space {
 mod tests {
     use quickcheck::*;
     use super::*;
-    use bencher::Bencher;
-    use rand::{rngs::SmallRng, FromEntropy};
 
     #[test]
     fn history_present_iff_added() {
@@ -144,25 +142,4 @@ mod tests {
         }
         quickcheck(test as fn(Vec<Vec<Space>>, Vec<Space>) -> TestResult);
     }
-
-/*
-    #[bench]
-    fn history_insert_19x19(bench: &mut Bencher) {
-        let mut rng = SmallRng::from_entropy();
-        let mut h = History::new();
-        bench.iter(|| {
-            h.insert(rng.sample_iter(&Standard).take(361))
-        });
-    }
-
-    #[bench]
-    fn hashset_insert_19x19(bench: &mut Bencher) {
-        use std::collections::HashSet;
-        let mut rng = SmallRng::from_entropy();
-        let mut h = HashSet::<Vec<Space>>::new();
-        bench.iter(|| {
-            h.insert(rng.sample_iter(&Standard).take(361).collect())
-        });
-    }
-*/
 }

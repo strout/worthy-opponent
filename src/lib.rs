@@ -6,7 +6,7 @@ extern crate bencher;
 #[cfg(test)]
 extern crate quickcheck;
 
-mod basics;
+pub mod basics;
 pub mod labeler;
 pub mod connectfour;
 pub mod game;
