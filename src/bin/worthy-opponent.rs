@@ -3,13 +3,14 @@ extern crate rand;
 extern crate worthy_opponent;
 
 use tiny_http::{Server, Request, Response};
-use rand::{Rng, FromEntropy, rngs::SmallRng};
+use rand::{Rng, FromEntropy, rngs::SmallRng, prelude::SliceRandom};
 use std::collections::HashMap;
 use worthy_opponent::ggp::{IExpr, Expr, GGP, SExpr, sexpr_to_db, sexpr_to_expr, parse_sexpr};
 use std::hash::Hash;
 use std::fmt::Display;
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
-use std::thread::{spawn, sleep_ms};
+use std::thread::{spawn, sleep};
+use std::time::Duration;
 use std::sync::{Mutex, Arc};
 
 #[derive(Debug)]
@@ -104,7 +105,7 @@ fn play_out<T: Rng>(rng: &mut T, ggp: &mut GGP, roles: &[usize]) -> HashMap<usiz
         ggp.goals().into_iter().map(|(k, v)| (k, v as f64)).collect()
     } else {
         let moves = roles.iter().map(|&r| {
-            (r, rng.choose(&ggp.legal_moves_for(r)[..]).unwrap().clone())
+            (r, ggp.legal_moves_for(r).choose(rng).unwrap().clone())
         }).collect::<Vec<_>>();
         ggp.play(&moves[..]);
         let mut result = play_out(rng, ggp, roles);
@@ -117,8 +118,8 @@ fn play_out<T: Rng>(rng: &mut T, ggp: &mut GGP, roles: &[usize]) -> HashMap<usiz
 
 enum Message<'a> {
     Info,
-    Preview(SExpr<'a>, u32),
-    Start(&'a str, &'a str, SExpr<'a>, u32, u32),
+    Preview(SExpr<'a>, u64),
+    Start(&'a str, &'a str, SExpr<'a>, u64, u64),
     Play(&'a str, Vec<Expr<'a>>),
     Stop(&'a str, Vec<Expr<'a>>),
     Abort(&'a str)
@@ -185,13 +186,13 @@ fn run_match(recvreqs: Receiver<(String, Request)>) {
             spawn(move || think(role, ggp, recvmovexprs, &*reply))
         };
         println!("Match {} preparing.", id);
-        sleep_ms(1000 * start_clock - 200);
+        sleep(Duration::from_millis(1000 * start_clock - 200));
         req.respond(Response::from_data("ready")).unwrap();
         println!("Match {} started.", id);
         while let Ok((desc, req)) = recvreqs.recv() {
             if let Some(Message::Play(_, mvs)) = parse_message(&desc) {
                 sendmovexprs.send(mvs.iter().map(|mv| mv.try_thru(&labeler, &lens)).collect()).unwrap();
-                sleep_ms(play_clock * 1000 - 200);
+                sleep(Duration::from_millis(play_clock * 1000 - 200));
                 let mut reply = reply.lock().unwrap();
                 req.respond(Response::from_data(match (&*reply).as_ref() {
                     None => "oops-i-timed-out".into(),
