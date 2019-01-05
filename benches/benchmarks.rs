@@ -3,11 +3,13 @@ extern crate criterion;
 extern crate rand;
 extern crate worthy_opponent;
 
-use ::rand::{Rng, FromEntropy, rngs::SmallRng, distributions::Standard};
+use ::rand::{Rng, FromEntropy, rngs::SmallRng, distributions::Standard, seq::SliceRandom};
 
 use criterion::Criterion;
 
 use worthy_opponent::basics::{Space, History};
+use worthy_opponent::game::Game;
+use worthy_opponent::go::*;
 
 fn history_insert_19x19(c: &mut Criterion) {
     let mut rng = SmallRng::from_entropy();
@@ -33,4 +35,33 @@ fn hashset_insert_19x19(c: &mut Criterion) {
 }
 
 criterion_group!(basics, history_insert_19x19, hashset_insert_19x19);
-criterion_main!(basics);
+
+fn play_legal_move(c: &mut Criterion) {
+    let mut rng = SmallRng::from_entropy();
+    c.bench_function("go: play legal move", move |b| b.iter(||
+    {
+        let mut go = Go::init();
+        for _ in 0..100 {
+            let mvs = go.legal_moves();
+            let mv = mvs.choose(&mut rng).unwrap().0;
+            go.play(&mv);
+        }
+    }));
+}
+
+fn play_playout_move(c: &mut Criterion) {
+    let mut rng = SmallRng::from_entropy();
+    c.bench_function("go: play playout move", move |b| b.iter(||
+    {
+        let mut go = Go::init();
+        for _ in 0..100 {
+            let mvs = go.playout_moves();
+            let mv = mvs.choose(&mut rng).unwrap().0;
+            go.play(&mv);
+        }
+    }));
+}
+
+criterion_group!(go, play_legal_move, play_playout_move);
+
+criterion_main!(basics, go);

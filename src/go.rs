@@ -207,35 +207,3 @@ impl Game for Go {
     }
     fn print_move(&mv: &usize) { print_pos(mv) }
 }
-
-#[cfg(test)]
-mod tests {
-    use game::Game;
-    use super::*;
-    use bencher::Bencher;
-    use rand::{FromEntropy, rngs::SmallRng};
-
-/*
-    #[bench]
-    fn play_legal_move(bench: &mut Bencher) {
-        let mut rng = SmallRng::from_entropy();
-        let mut go = Go::init();
-        bench.iter(|| {
-            let mvs = go.legal_moves();
-            let mv = rng.choose(&mvs[..]).unwrap().0;
-            go.play(&mv);
-        });
-    }
-
-    #[bench]
-    fn play_playout_move(bench: &mut Bencher) {
-        let mut rng = SmallRng::from_entropy();
-        let mut go = Go::init();
-        bench.iter(|| {
-            let mvs = go.playout_moves();
-            let mv = rng.choose(&mvs[..]).unwrap().0;
-            go.play(&mv);
-        });
-    }
-*/
-}
